@@ -2,17 +2,15 @@ import sys
 import argparse
 import csv
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QFileDialog, QLabel, QHBoxLayout, QLineEdit, QComboBox
+    QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QFileDialog, QLabel, QHBoxLayout, QLineEdit
 )
 from PyQt5.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import numpy as np
 from astropy.table import Table, vstack
-from astropy.io import fits
 from prepare_spec import coadd, prepare, prepare_other_grating
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
-from UV_spec_class.py import UV_spec
 
 
 class SpectralFluxApp(QMainWindow):
@@ -22,21 +20,23 @@ class SpectralFluxApp(QMainWindow):
         self.main_widget = QWidget(self)
         self.setCentralWidget(self.main_widget)
 
-        self.layout = QVBoxLayout(self.main_widget)
+        # Create the main layout
+        self.main_layout = QVBoxLayout(self.main_widget)
 
-        # plotting area 
+        # Plot area
         self.figure = Figure()
         self.canvas = FigureCanvas(self.figure)
+        self.main_layout.addWidget(self.canvas)
 
+        # Add toolbar directly below the canvas
         self.toolbar = NavigationToolbar(self.canvas, self)
-    
-        self.layout.addWidget(self.canvas)
+        self.main_layout.addWidget(self.toolbar)
 
-        # controls
+        # Controls layout for buttons, labels, etc.
         self.controls_layout = QHBoxLayout()
-        self.layout.addLayout(self.controls_layout)
+        self.main_layout.addLayout(self.controls_layout)
 
-        # load data button
+        # Load data button
         self.load_button = QPushButton('Load CSV with FITS Paths')
         self.load_button.clicked.connect(self.load_csv_with_fits_paths)
         self.controls_layout.addWidget(self.load_button)
@@ -45,13 +45,25 @@ class SpectralFluxApp(QMainWindow):
         self.coadd_button.clicked.connect(self.coadd_and_plot)
         self.controls_layout.addWidget(self.coadd_button)
 
-        # status bar
+        # Add Redshift label and input
+        self.redshift_label = QLabel('Redshift:')
+        self.controls_layout.addWidget(self.redshift_label)
+
+        self.redshift_input = QLineEdit(self)
+        self.controls_layout.addWidget(self.redshift_input)
+
+        # Add button to plot expected line locations
+        self.plot_lines_button = QPushButton('Plot Expected Line Locations')
+        self.plot_lines_button.clicked.connect(self.plot_expected_lines)
+        self.controls_layout.addWidget(self.plot_lines_button)
+
+        # Status bar
         self.statusBar().showMessage('Ready')
 
         self.setWindowTitle('Spectral Flux Measurement')
         self.setGeometry(100, 100, 800, 600)
 
-        # initialize spectrum data
+        # Initialize spectrum data
         self.spectrum_data = []
         self.coadded_spectrum = None
         self.fits_file_paths = []
@@ -72,7 +84,7 @@ class SpectralFluxApp(QMainWindow):
             with open(csv_file_path, 'r') as csvfile:
                 reader = csv.reader(csvfile)
                 self.fits_file_paths = [row[0] for row in reader]  # Assuming each row contains one file path
-                
+
             self.statusBar().showMessage(f'Loaded {len(self.fits_file_paths)} FITS file paths from CSV')
             self.load_fits_files()
         except Exception as e:
@@ -96,7 +108,7 @@ class SpectralFluxApp(QMainWindow):
         if len(self.spectrum_data) > 0:
             # Combine all tables using vstack
             combined_table = vstack(self.spectrum_data)
-            
+
             # Perform co-addition (you can change delta as needed)
             delta = 0.1  # Example value, adjust as necessary
             self.coadded_spectrum = coadd(combined_table, delta)
@@ -123,6 +135,23 @@ class SpectralFluxApp(QMainWindow):
         else:
             self.statusBar().showMessage('No co-added spectrum to plot')
 
+    def plot_expected_lines(self):
+        try:
+            redshift = float(self.redshift_input.text())
+            line_wavelengths = np.array([1215.67, 1031.92, 1037.61, 1238.82, 1242.8, 1393.75, 1402.77, 1548.19, 1550.77])  # Example line locations in rest frame
+            line_labels = ['Lya', 'O VI 1031', 'O VI 1037', 'N V 1238', 'N V 1242', 'Si 1393', 'Si 1402', 'C IV 1548', 'C IV 1550']
+            observed_lines = line_wavelengths * (1 + redshift)
+
+            ax = self.figure.gca()
+            for i in range(len(line_wavelengths)):
+                ax.axvline(x=line_wavelengths[i], linestyle='--', label=f'{line_labels[i]}')
+            ax.legend()
+            self.canvas.draw()
+        except ValueError as e:
+            print(e)
+            self.statusBar().showMessage('Invalid redshift input. Please enter a number.')
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Spectral Flux App')
     parser.add_argument('--csv', type=str, help='Path to the CSV file containing FITS file paths', default=None)
@@ -132,4 +161,3 @@ if __name__ == "__main__":
     main_win = SpectralFluxApp(csv_file_path=args.csv)
     main_win.show()
     sys.exit(app.exec_())
-
