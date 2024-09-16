@@ -470,5 +470,5 @@ class spec:
         
         string = f'Poisson estimates give lower error of {error_poisson_down} and upper error of {error_poisson_up}. Jackknife estimate is {jackknife_sigma}, robust.mad gives {jackknife_sigma2}'
         print(string)
-        return flux
+        return flux, error_poisson_up
         
