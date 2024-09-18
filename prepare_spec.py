@@ -16,6 +16,7 @@ from scipy.integrate import simpson as simps
 from csv import writer
 import extinction
 from statsmodels import robust
+from astropy.stats import poisson_conf_interval as pcf
 
 def prepare(file):
     """Nicely formats file into columns. Also does bitmasking"""
@@ -128,29 +129,48 @@ def prepare_other_grating(file, type = 0, grating = 'G230L'):
 
 # In[78]:
 
+def combine_tables(table1, table2, low1, high1, low2, high2, low3, high3):
+    flux1 = table1['flux']
+    flux2 = table2['flux']
+    
+    wave1 = table1['wave']
+    wave2 = table2['wave']
+    
+    
+    mask1 = np.where((((wave1 >= low1) & (wave1 < high1)) | ((wave1 > low3) & (wave1 <= high3))))
+    mask2 = np.where((wave2 >= low2) & (wave2 < high2))
+    
+    new_table1 = table1[mask1]
+    new_table2 = table2[mask2]
+    
+    final_table = vstack([new_table1, new_table2])
+    
+
+    
+    return final_table
 
 def coadd(combined_table, delta, subtract_background=False):
-#     '''Coadds spectra from a combined table of exposures
-#     Parameters
-#     ----------
-#     combined_table : stacked table
-#         combined data from exposures w same grating
-#     delta : float
-#         delta value between points. can be adjusted as desired/needed
-#     Returns
-#     -------
-#     coadded_spectrum : table
-#         new table with flux and wavelength coadded
-            
-#     '''
-    #create a wavelength array over which to coadd, which includes all combined exposures
-    min = np.min(combined_table['wave'])
-    max = np.max(combined_table['wave'])
-#     min = 1130
-#     max=1800
-    wave = np.arange(min, max, delta)
+    """
+    Coadds spectra from a combined table of exposures.
+
+    Parameters
+    ----------
+    combined_table : stacked table
+        Combined data from exposures with the same grating.
+    delta : float
+        Delta value between points. Can be adjusted as desired/needed.
+
+    Returns
+    -------
+    coadded_spectrum : table
+        New table with coadded flux and wavelength.
+    """
+    # Create a wavelength array over which to coadd
+    min_wave = np.min(combined_table['wave'])
+    max_wave = np.max(combined_table['wave'])
+    wave = np.arange(min_wave, max_wave, delta)
     
-    #initialize columns of the dataset
+    # Initialize columns of the dataset
     coadded_spectrum = Table()
     coadded_spectrum['wave'] = wave
     coadded_spectrum['flux'] = 0.0
@@ -172,7 +192,7 @@ def coadd(combined_table, delta, subtract_background=False):
     coadded_spectrum['net_times_exp'] = 0.0
     coadded_spectrum['background_times_exp'] = 0.0
     coadded_spectrum['wavediff_ratio'] = 0.0
-    
+
     #coadd with desired lambda
     for pixel in coadded_spectrum:
         thispixel = combined_table[(combined_table['wave'] >= (pixel['wave'] - delta/2)) & (combined_table['wave'] < (pixel['wave'] + delta/2))]
@@ -204,7 +224,7 @@ def coadd(combined_table, delta, subtract_background=False):
               pixel['error_poisson_down'] = 0 
 
     good_errors = coadded_spectrum[np.isfinite(coadded_spectrum['error_poisson_up'])]
-
+    print(good_errors['error_poisson_up'])
     for pixel in coadded_spectrum:
         if np.isnan(pixel['error_poisson_up']):
       
@@ -217,7 +237,7 @@ def coadd(combined_table, delta, subtract_background=False):
             # Multiple this ratio by the upward going error in gcounts
             pixel['error_poisson_up'] = pixel['gcounts_error_up']*ratio
 
-          # Record the wavelenght mis-match between the nearest good error pixel and thispixel.Need to make sure this isn't too big (a few  to ~10 angstroms is ok.
+          # Record the wavelenght mis-match between the nearest good error pixel and this pixel. Need to make sure this isn't too big (a few  to ~10 angstroms is ok.
 
             pixel['wavediff_ratio'] = np.abs(pixel['wave'] - pixel_nearest_good_error['wave'])
 
