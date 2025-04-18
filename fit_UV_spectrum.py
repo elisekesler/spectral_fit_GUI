@@ -217,9 +217,11 @@ class SpectralFluxApp(QMainWindow):
                 # Find the matching index in line_labels (add 1 because we skip 'Full Spectrum')
                 self.current_line = self.line_labels.index(line_label)
                 # Enable the action buttons
-                self.action_button.setEnabled(True)
-                self.subtract_continuum_button.setEnabled(True)
-                self.undo_button.setEnabled(True)
+                self.update_button_states(True)
+
+                # self.action_button.setEnabled(True)
+                # self.subtract_continuum_button.setEnabled(True)
+                # self.undo_button.setEnabled(True)
     # Modified on_object_selection_change method to handle the object CSV files
     def on_object_selection_change(self):
         """Handle when a row in the objects table is selected"""
@@ -756,18 +758,36 @@ class SpectralFluxApp(QMainWindow):
         
         self.flux_method_dropdown = QComboBox()
         self.flux_method_dropdown.addItems(["Direct Integration", "Gaussian Fit"])
+        self.flux_method_dropdown.currentIndexChanged.connect(self.on_flux_method_changed)
         method_layout.addWidget(self.flux_method_dropdown)
         method_layout.addStretch()
     
         detailed_layout.addLayout(method_layout)
         
-        # Add the action buttons in a horizontal layout
+        self.method_controls_container = QWidget()
+        self.method_layout = QVBoxLayout(self.method_controls_container)
+
+        self.create_direct_integration_controls()
+
+        detailed_layout.addWidget(self.method_controls_container)
+        detailed_layout.addStretch()
+
+        self.right_layout.addWidget(self.detailed_controls_frame)
+
+        self.action_button.setEnabled(False)
+        self.subtract_continuum_button.setEnabled(False)
+        self.undo_button.setEnabled(False)
+
+    def create_direct_integration_controls(self):
+        # Clear existing controls
+        self.clear_method_controls()
+        
+        # Create the buttons for Direct Integration
         buttons_layout = QHBoxLayout()
         
         self.action_button = QPushButton("Find Flux and Error")
         self.action_button.clicked.connect(self.action_on_selected_line)
         buttons_layout.addWidget(self.action_button)
-        
         self.subtract_continuum_button = QPushButton("Subtract Continuum")
         self.subtract_continuum_button.clicked.connect(self.subtract_continuum_on_selected_line)
         buttons_layout.addWidget(self.subtract_continuum_button)
@@ -776,18 +796,98 @@ class SpectralFluxApp(QMainWindow):
         self.undo_button.clicked.connect(self.undo_continuum_on_selected_line)
         buttons_layout.addWidget(self.undo_button)
         
-        detailed_layout.addLayout(buttons_layout)
-        
-        # Add spacing at the bottom
-        detailed_layout.addStretch()
-        
-        # Add the frame to the right layout
-        self.right_layout.addWidget(self.detailed_controls_frame)
+        self.method_layout.addLayout(buttons_layout)
         
         # Initially disable the buttons until a line is selected
         self.action_button.setEnabled(False)
         self.subtract_continuum_button.setEnabled(False)
         self.undo_button.setEnabled(False)
+    def create_gaussian_fit_controls(self):
+        # Clear existing controls
+        self.clear_method_controls()
+        
+        # Create top row of buttons
+        buttons_layout = QHBoxLayout()
+        
+        self.fit_model_button = QPushButton("Fit Model")
+        self.fit_model_button.clicked.connect(self.fit_gaussian_model)
+        buttons_layout.addWidget(self.fit_model_button)
+        
+        self.add_line_button = QPushButton("Add Line")
+        self.add_line_button.clicked.connect(self.add_gaussian_line)
+        buttons_layout.addWidget(self.add_line_button)
+        
+        self.view_results_button = QPushButton("View Fit Results")
+        self.view_results_button.clicked.connect(self.view_fit_results)
+        buttons_layout.addWidget(self.view_results_button)
+        
+        self.method_layout.addLayout(buttons_layout)
+        
+        # Create a scroll area for line entries
+        from PyQt5.QtWidgets import QScrollArea
+        
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setMinimumHeight(150)
+        self.scroll_area.setFrameShape(QFrame.StyledPanel)
+        
+        # Create a container widget for the scroll area
+        self.line_entries_container = QWidget()
+        self.line_entries_layout = QVBoxLayout(self.line_entries_container)
+        self.line_entries_layout.setSpacing(5)
+        self.line_entries_layout.addStretch()
+        
+        # Set the container as the scroll area's widget
+        self.scroll_area.setWidget(self.line_entries_container)
+        
+        # Add the scroll area to the method layout
+        self.method_layout.addWidget(self.scroll_area)
+        
+        # Initially disable buttons until a line is selected
+        self.fit_model_button.setEnabled(False)
+        self.add_line_button.setEnabled(False)
+        self.view_results_button.setEnabled(False)
+    # def create_gaussian_fit_controls(self):
+    #     # Clear existing controls
+    #     self.clear_method_controls()
+        
+    #     # Create top row of buttons
+    #     buttons_layout = QHBoxLayout()
+        
+    #     self.fit_model_button = QPushButton("Fit Model")
+    #     self.fit_model_button.clicked.connect(self.fit_gaussian_model)
+    #     buttons_layout.addWidget(self.fit_model_button)
+        
+    #     self.add_line_button = QPushButton("Add Line")
+    #     self.add_line_button.clicked.connect(self.add_gaussian_line)
+    #     buttons_layout.addWidget(self.add_line_button)
+        
+    #     self.view_results_button = QPushButton("View Fit Results")
+        # self.view_results_button.clicked.connect(self.view_fit_results)
+        # buttons_layout.addWidget(self.view_results_button)
+        # self.method_layout.addLayout(buttons_layout)
+        
+        # # Create a container for line entries
+        # self.line_entries_container = QWidget()
+        # self.line_entries_layout = QVBoxLayout(self.line_entries_container)
+        # self.method_layout.addWidget(self.line_entries_container)
+        
+        # # Initially disable buttons until a line is selected
+        # self.fit_model_button.setEnabled(False)
+        # self.add_line_button.setEnabled(False)
+        # self.view_results_button.setEnabled(False)
+    def clear_method_controls(self):
+        # Remove all widgets from the method layout
+        while self.method_layout.count():
+            item = self.method_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.layout():
+                # Recursively clear layouts
+                while item.layout().count():
+                    child = item.layout().takeAt(0)
+                    if child.widget():
+                        child.widget().deleteLater()
     # Modified save_objects_csv method to also save individual object CSVs
     def save_objects_csv(self):
         options = QFileDialog.Options()
@@ -863,7 +963,38 @@ class SpectralFluxApp(QMainWindow):
         except ValueError:
             self.statusBar().showMessage('Invalid redshift value')
             self.redshift_input.setText(str(self.redshift))
-
+    # Add method to handle flux method changes
+    def on_flux_method_changed(self, index):
+        selected_method = self.flux_method_dropdown.currentText()
+        
+        if selected_method == "Direct Integration":
+            self.create_direct_integration_controls()
+        elif selected_method == "Gaussian Fit":
+            self.create_gaussian_fit_controls()
+        
+        # Update button states based on line selection
+        if self.selected_line_display.text() != "None":
+            self.update_button_states(True)
+        else:
+            self.update_button_states(False)
+    # Add method to update button states
+    def update_button_states(self, enabled):
+        selected_method = self.flux_method_dropdown.currentText()
+            
+        if selected_method == "Direct Integration":
+            if hasattr(self, 'action_button'):
+                self.action_button.setEnabled(enabled)
+            if hasattr(self, 'subtract_continuum_button'):
+                self.subtract_continuum_button.setEnabled(enabled)
+            if hasattr(self, 'undo_button'):
+                self.undo_button.setEnabled(enabled)
+        elif selected_method == "Gaussian Fit":
+            if hasattr(self, 'fit_model_button'):
+                self.fit_model_button.setEnabled(enabled)
+            if hasattr(self, 'add_line_button'):
+                self.add_line_button.setEnabled(enabled)
+            if hasattr(self, 'view_results_button'):
+                self.view_results_button.setEnabled(enabled)
     def update_scale(self):
         try:
             new_scale = float(self.scale_input.text())
@@ -875,6 +1006,82 @@ class SpectralFluxApp(QMainWindow):
         except ValueError:
             self.statusBar().showMessage('Invalid scale value')
             self.scale_input.setText(f"{self.scale_value:.2e}")  # Revert with scientific notation
+    # Add placeholder functions for Gaussian Fit mode
+    def fit_gaussian_model(self):
+        self.statusBar().showMessage("Gaussian model fitting - placeholder")
+
+    def view_fit_results(self):
+        self.statusBar().showMessage("View fit results - placeholder")
+    def add_gaussian_line(self):
+        self.statusBar().showMessage("Adding Gaussian line - placeholder")
+        
+        # Create a new line entry row (black box with a button)
+        line_entry = QFrame()
+        line_entry.setFrameShape(QFrame.StyledPanel)
+        line_entry.setFrameShadow(QFrame.Raised)
+        line_entry.setStyleSheet("background-color: black; color: white;")
+        line_entry.setMinimumHeight(40)
+        line_entry.setMaximumHeight(40)
+        
+        entry_layout = QHBoxLayout(line_entry)
+        entry_layout.setContentsMargins(10, 5, 10, 5)
+        
+        line_label = QLabel("Line Name")
+        line_label.setStyleSheet("color: white;")
+        entry_layout.addWidget(line_label)
+        
+        entry_layout.addStretch()
+        
+        view_params_button = QPushButton("View Parameters")
+        view_params_button.clicked.connect(lambda: self.view_line_parameters(line_label.text()))
+        entry_layout.addWidget(view_params_button)
+        
+        # Remove the stretch from the end to allow new widgets to appear
+        if self.line_entries_layout.count() > 0:
+            # Check if the last item is a spacer
+            item = self.line_entries_layout.itemAt(self.line_entries_layout.count() - 1)
+            if item and item.spacerItem():
+                self.line_entries_layout.removeItem(item)
+        
+        # Add the line entry to the container
+        self.line_entries_layout.addWidget(line_entry)
+        
+        # Add the stretch back
+        self.line_entries_layout.addStretch()
+        
+        # Update the scroll area to ensure the new widget is visible
+        self.scroll_area.ensureWidgetVisible(line_entry)
+
+    def clear_line_entries(self):
+        if hasattr(self, 'line_entries_layout'):
+            while self.line_entries_layout.count():
+                item = self.line_entries_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+                elif item.spacerItem():
+                    self.line_entries_layout.removeItem(item)
+            
+            # Add back the stretch
+            self.line_entries_layout.addStretch()
+
+    def clear_method_controls(self):
+        # Clear the line entries if we're switching from Gaussian fit mode
+        if hasattr(self, 'line_entries_layout'):
+            self.clear_line_entries()
+        
+        # Remove all widgets from the method layout
+        while self.method_layout.count():
+            item = self.method_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.layout():
+                # Recursively clear layouts
+                while item.layout().count():
+                    child = item.layout().takeAt(0)
+                    if child.widget():
+                        child.widget().deleteLater()
+    def view_line_parameters(self, line_name):
+        QMessageBox.information(self, "Line Parameters", f"Parameters for {line_name} - placeholder")
 
     def save_spectrum(self):
         if self.coadded_spectrum is None:
