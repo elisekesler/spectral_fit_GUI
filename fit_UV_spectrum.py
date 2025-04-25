@@ -497,6 +497,24 @@ class SpectralFluxApp(QMainWindow):
             self.statusBar().showMessage(f"Updated left table from CSV: {csv_path}")
         except Exception as e:
             self.statusBar().showMessage(f"Error reading object CSV: {str(e)}")
+
+    def init_gaussian_fit_mode(self):
+            """Initialize variables needed for Gaussian fit mode"""
+            # Create internal storage directory if it doesn't exist
+            os.makedirs("internal", exist_ok=True)
+            
+            # Initialize spectral lines list if not exists
+            if not hasattr(self, 'spectral_lines'):
+                self.spectral_lines = []
+            
+            # Initialize component parameters dictionary if not exists
+            if not hasattr(self, 'component_parameters'):
+                self.component_parameters = {}
+                self.load_component_parameters()
+            
+            # Load any existing spectral lines
+            self.load_spectral_lines()
+
     def create_new_object_csv(self, csv_path, row_index):
         """Create a new CSV file with the default structure for this object"""
         try:
@@ -806,6 +824,10 @@ class SpectralFluxApp(QMainWindow):
         # Clear existing controls
         self.clear_method_controls()
         
+        # Initialize storage for spectral lines and components
+        if not hasattr(self, 'spectral_lines'):
+            self.spectral_lines = []
+        
         # Create top row of buttons
         buttons_layout = QHBoxLayout()
         
@@ -843,9 +865,12 @@ class SpectralFluxApp(QMainWindow):
         # Add the scroll area to the method layout
         self.method_layout.addWidget(self.scroll_area)
         
+        # Load existing spectral lines if any
+        self.load_spectral_lines()
+        
         # Initially disable buttons until a line is selected
         self.fit_model_button.setEnabled(False)
-        self.add_line_button.setEnabled(False)
+        self.add_line_button.setEnabled(True)  # We should allow adding lines at any time
         self.view_results_button.setEnabled(False)
     # def create_gaussian_fit_controls(self):
     #     # Clear existing controls
@@ -971,6 +996,7 @@ class SpectralFluxApp(QMainWindow):
             self.create_direct_integration_controls()
         elif selected_method == "Gaussian Fit":
             self.create_gaussian_fit_controls()
+            self.init_gaussian_fit_mode()  # Initialize Gaussian fit mode
         
         # Update button states based on line selection
         if self.selected_line_display.text() != "None":
@@ -1012,46 +1038,1122 @@ class SpectralFluxApp(QMainWindow):
 
     def view_fit_results(self):
         self.statusBar().showMessage("View fit results - placeholder")
-    def add_gaussian_line(self):
-        self.statusBar().showMessage("Adding Gaussian line - placeholder")
+    def create_spectral_line_entry(self, name, rest_wavelength, doublet_info=None, geocoronal=False):
+        """Create a visual entry for a spectral line and add to the UI"""
+        from PyQt5.QtWidgets import QFrame, QLabel, QPushButton, QHBoxLayout
         
-        # Create a new line entry row (black box with a button)
+        # Create a SpectralLine object
+        components = ["narrow"]  # Default component
+        
+        # Create DoubletInfo object if needed
+        doublet = None
+        if doublet_info:
+            from gaussian_fitfunctions import DoubletInfo
+            doublet = DoubletInfo(
+                secondary_wavelength=doublet_info["secondary_wavelength"],
+                ratio=doublet_info["ratio"]
+            )
+        
+        # Create the SpectralLine object
+        from gaussian_fitfunctions import SpectralLine
+        spectral_line = SpectralLine(
+            rest_wavelength=rest_wavelength,
+            name=name,
+            components=components,
+            doublet=doublet,
+            geocoronal=geocoronal
+        )
+        
+        # Store the spectral line
+        self.spectral_lines.append(spectral_line)
+        
+        # Create visual frame
         line_entry = QFrame()
         line_entry.setFrameShape(QFrame.StyledPanel)
         line_entry.setFrameShadow(QFrame.Raised)
-        line_entry.setStyleSheet("background-color: black; color: white;")
+        line_entry.setStyleSheet("background-color: #f0f0f0;")
         line_entry.setMinimumHeight(40)
         line_entry.setMaximumHeight(40)
         
         entry_layout = QHBoxLayout(line_entry)
         entry_layout.setContentsMargins(10, 5, 10, 5)
         
-        line_label = QLabel("Line Name")
-        line_label.setStyleSheet("color: white;")
+        # Display format: Name - Wavelength
+        if doublet:
+            display_text = f"{name} ({rest_wavelength:.2f}, {doublet.secondary_wavelength:.2f} Å)"
+        else:
+            display_text = f"{name} ({rest_wavelength:.2f} Å)"
+            
+        line_label = QLabel(display_text)
         entry_layout.addWidget(line_label)
         
         entry_layout.addStretch()
         
-        view_params_button = QPushButton("View Parameters")
-        view_params_button.clicked.connect(lambda: self.view_line_parameters(line_label.text()))
+        # Store a reference to the spectral line object in the widget
+        line_entry.spectral_line = spectral_line
+        
+        view_params_button = QPushButton("Parameters")
+        view_params_button.clicked.connect(lambda: self.view_line_parameters(spectral_line))
         entry_layout.addWidget(view_params_button)
         
-        # Remove the stretch from the end to allow new widgets to appear
+        # Remove the stretch from the end of line_entries_layout
         if self.line_entries_layout.count() > 0:
-            # Check if the last item is a spacer
             item = self.line_entries_layout.itemAt(self.line_entries_layout.count() - 1)
             if item and item.spacerItem():
                 self.line_entries_layout.removeItem(item)
         
-        # Add the line entry to the container
+        # Add the line entry
         self.line_entries_layout.addWidget(line_entry)
-        
-        # Add the stretch back
         self.line_entries_layout.addStretch()
         
-        # Update the scroll area to ensure the new widget is visible
-        self.scroll_area.ensureWidgetVisible(line_entry)
+        # Enable the fit button if we have at least one line
+        self.fit_model_button.setEnabled(True)
+        
+        return spectral_line
 
+    def save_spectral_lines(self):
+        """Save the spectral lines to a CSV file"""
+        import csv
+        import os
+        
+        os.makedirs("internal", exist_ok=True)
+        
+        csv_path = os.path.join("internal", "spectral_lines.csv")
+        
+        with open(csv_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            
+            # Write header
+            writer.writerow(["name", "rest_wavelength", "components", "doublet_wavelength", "doublet_ratio", "geocoronal"])
+            
+            # Write each line
+            for line in self.spectral_lines:
+                # Components are stored as a comma-separated list
+                components_str = ",".join(line.components)
+                
+                # Doublet info
+                doublet_wavelength = ""
+                doublet_ratio = ""
+                if line.doublet:
+                    doublet_wavelength = line.doublet.secondary_wavelength
+                    doublet_ratio = line.doublet.ratio
+                    
+                writer.writerow([
+                    line.name,
+                    line.rest_wavelength,
+                    components_str,
+                    doublet_wavelength,
+                    doublet_ratio,
+                    line.geocoronal
+                ])
+        
+        self.statusBar().showMessage(f"Saved {len(self.spectral_lines)} spectral lines to {csv_path}")
+    def save_component_parameters(self):
+        """Save component parameters to a CSV file"""
+        import csv
+        import os
+        
+        os.makedirs("internal", exist_ok=True)
+        
+        csv_path = os.path.join("internal", "component_parameters.csv")
+        
+        with open(csv_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            
+            # Write header
+            writer.writerow([
+                "key", "z_value", "z_min", "z_max", 
+                "sigma_value", "sigma_min", "sigma_max", 
+                "flux_value"
+            ])
+            
+            # Write each component's parameters
+            for key, params in self.component_parameters.items():
+                writer.writerow([
+                    key,
+                    params.get('z_value', self.redshift),
+                    params.get('z_min', max(0, self.redshift - 0.05)),
+                    params.get('z_max', self.redshift + 0.05),
+                    params.get('sigma_value', 200),
+                    params.get('sigma_min', 10),
+                    params.get('sigma_max', 1000),
+                    params.get('flux_value', 100)
+                ])
+        
+        self.statusBar().showMessage(f"Saved parameters for {len(self.component_parameters)} components to {csv_path}")
+
+    def load_component_parameters(self):
+        """Load component parameters from the CSV file"""
+        import csv
+        import os
+        
+        csv_path = os.path.join("internal", "component_parameters.csv")
+        
+        if not os.path.exists(csv_path):
+            # No saved parameters yet
+            self.component_parameters = {}
+            return
+        
+        # Initialize parameters dictionary
+        self.component_parameters = {}
+        
+        # Load from CSV
+        with open(csv_path, 'r') as f:
+            reader = csv.reader(f)
+            
+            # Skip header
+            next(reader, None)
+            
+            for row in reader:
+                if len(row) >= 8:
+                    key = row[0]
+                    self.component_parameters[key] = {
+                        'z_value': float(row[1]),
+                        'z_min': float(row[2]),
+                        'z_max': float(row[3]),
+                        'sigma_value': float(row[4]),
+                        'sigma_min': float(row[5]),
+                        'sigma_max': float(row[6]),
+                        'flux_value': float(row[7])
+                    }
+        
+        self.statusBar().showMessage(f"Loaded parameters for {len(self.component_parameters)} components from {csv_path}")
+    def view_line_parameters(self, spectral_line):
+        """Open a dialog to view and edit a line's parameters and components"""
+        from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QFormLayout, QDialogButtonBox,
+                                QTabWidget, QWidget, QLineEdit, QDoubleSpinBox,
+                                QPushButton, QCheckBox, QComboBox, QListWidget,
+                                QListWidgetItem, QHBoxLayout, QGroupBox)
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Parameters for {spectral_line.name}")
+        dialog.setMinimumWidth(500)
+        main_layout = QVBoxLayout(dialog)
+        
+        # Create tabs for Line Properties and Components
+        tab_widget = QTabWidget()
+        
+        # Line Properties Tab
+        line_tab = QWidget()
+        line_layout = QFormLayout(line_tab)
+        
+        # Basic line properties
+        name_input = QLineEdit(spectral_line.name)
+        line_layout.addRow("Name:", name_input)
+        
+        wavelength_input = QDoubleSpinBox()
+        wavelength_input.setRange(1000, 10000)
+        wavelength_input.setValue(spectral_line.rest_wavelength)
+        wavelength_input.setDecimals(2)
+        line_layout.addRow("Rest Wavelength (Å):", wavelength_input)
+        
+        # Doublet properties
+        is_doublet = QCheckBox("Is a doublet")
+        is_doublet.setChecked(spectral_line.doublet is not None)
+        line_layout.addRow(is_doublet)
+        
+        secondary_wavelength = QDoubleSpinBox()
+        secondary_wavelength.setRange(1000, 10000)
+        secondary_wavelength.setValue(spectral_line.doublet.secondary_wavelength if spectral_line.doublet else spectral_line.rest_wavelength + 5)
+        secondary_wavelength.setDecimals(2)
+        secondary_wavelength.setEnabled(spectral_line.doublet is not None)
+        line_layout.addRow("Secondary Wavelength (Å):", secondary_wavelength)
+        
+        ratio_input = QDoubleSpinBox()
+        ratio_input.setRange(0.01, 10)
+        ratio_input.setValue(spectral_line.doublet.ratio if spectral_line.doublet else 0.5)
+        ratio_input.setDecimals(3)
+        ratio_input.setEnabled(spectral_line.doublet is not None)
+        line_layout.addRow("Flux Ratio:", ratio_input)
+        
+        # Connect doublet checkbox
+        is_doublet.stateChanged.connect(lambda state: secondary_wavelength.setEnabled(state))
+        is_doublet.stateChanged.connect(lambda state: ratio_input.setEnabled(state))
+        
+        # Geocoronal option
+        is_geocoronal = QCheckBox("Is a geocoronal line")
+        is_geocoronal.setChecked(spectral_line.geocoronal)
+        line_layout.addRow(is_geocoronal)
+        
+        tab_widget.addTab(line_tab, "Line Properties")
+        
+        # Components Tab
+        components_tab = QWidget()
+        components_layout = QVBoxLayout(components_tab)
+        
+        # Component list
+        component_list = QListWidget()
+        for comp in spectral_line.components:
+            component_list.addItem(comp)
+        components_layout.addWidget(component_list)
+        
+        # Buttons for add/remove components
+        components_btn_layout = QHBoxLayout()
+        
+        add_comp_btn = QPushButton("Add Component")
+        components_btn_layout.addWidget(add_comp_btn)
+        
+        remove_comp_btn = QPushButton("Remove Selected")
+        components_btn_layout.addWidget(remove_comp_btn)
+        
+        components_layout.addLayout(components_btn_layout)
+        
+        # Component parameter group
+        comp_params_group = QGroupBox("Component Parameters")
+        comp_params_layout = QFormLayout(comp_params_group)
+        
+        comp_name_input = QLineEdit()
+        comp_params_layout.addRow("Name:", comp_name_input)
+        
+        # Initial redshift from main GUI
+        redshift_input = QDoubleSpinBox()
+        redshift_input.setRange(0, 10)
+        redshift_input.setValue(self.redshift)
+        redshift_input.setDecimals(5)
+        comp_params_layout.addRow("Initial Redshift:", redshift_input)
+        
+        # Redshift constraints
+        redshift_min = QDoubleSpinBox()
+        redshift_min.setRange(0, 10)
+        redshift_min.setValue(max(0, self.redshift - 0.05))
+        redshift_min.setDecimals(5)
+        comp_params_layout.addRow("Min Redshift:", redshift_min)
+        
+        redshift_max = QDoubleSpinBox()
+        redshift_max.setRange(0, 10)
+        redshift_max.setValue(self.redshift + 0.05)
+        redshift_max.setDecimals(5)
+        comp_params_layout.addRow("Max Redshift:", redshift_max)
+        
+        # Sigma (velocity dispersion)
+        sigma_input = QDoubleSpinBox()
+        sigma_input.setRange(10, 1000)
+        sigma_input.setValue(200)  # Default
+        sigma_input.setDecimals(1)
+        comp_params_layout.addRow("Initial Sigma (km/s):", sigma_input)
+        
+        # Sigma constraints
+        sigma_min = QDoubleSpinBox()
+        sigma_min.setRange(0, 1000)
+        sigma_min.setValue(10)
+        sigma_min.setDecimals(1)
+        comp_params_layout.addRow("Min Sigma:", sigma_min)
+        
+        sigma_max = QDoubleSpinBox()
+        sigma_max.setRange(0, 5000)
+        sigma_max.setValue(1000)
+        sigma_max.setDecimals(1)
+        comp_params_layout.addRow("Max Sigma:", sigma_max)
+        
+        # Initial flux guess
+        flux_input = QDoubleSpinBox()
+        flux_input.setRange(1, 1e6)
+        flux_input.setValue(100)
+        flux_input.setDecimals(1)
+        comp_params_layout.addRow("Initial Flux:", flux_input)
+        
+        # Add to layout
+        components_layout.addWidget(comp_params_group)
+        
+        # Add/Save component button
+        save_comp_btn = QPushButton("Add/Update Component")
+        components_layout.addWidget(save_comp_btn)
+        
+        # Initialize component parameters dictionary if not exists
+        if not hasattr(self, 'component_parameters'):
+            self.component_parameters = {}
+        
+        # Handler for component selection
+        def on_component_selected():
+            if not component_list.currentItem():
+                return
+                
+            comp_name = component_list.currentItem().text()
+            comp_name_input.setText(comp_name)
+            
+            # Load saved parameters if they exist
+            param_key = f"{spectral_line.name}_{comp_name}"
+            if param_key in self.component_parameters:
+                params = self.component_parameters[param_key]
+                redshift_input.setValue(params.get('z_value', self.redshift))
+                redshift_min.setValue(params.get('z_min', max(0, self.redshift - 0.05)))
+                redshift_max.setValue(params.get('z_max', self.redshift + 0.05))
+                sigma_input.setValue(params.get('sigma_value', 200))
+                sigma_min.setValue(params.get('sigma_min', 10))
+                sigma_max.setValue(params.get('sigma_max', 1000))
+                flux_input.setValue(params.get('flux_value', 100))
+        
+        # Connect component selection
+        component_list.itemClicked.connect(lambda: on_component_selected())
+        
+        # Handler for adding a new component
+        def add_component():
+            comp_name = f"component_{component_list.count() + 1}"
+            component_list.addItem(comp_name)
+            component_list.setCurrentRow(component_list.count() - 1)
+            comp_name_input.setText(comp_name)
+            # Add to spectral line components
+            spectral_line.components.append(comp_name)
+        
+        # Handler for removing a component
+        def remove_component():
+            if not component_list.currentItem():
+                return
+                
+            row = component_list.currentRow()
+            comp_name = component_list.currentItem().text()
+            
+            # Remove from components list and UI
+            component_list.takeItem(row)
+            if comp_name in spectral_line.components:
+                spectral_line.components.remove(comp_name)
+                
+            # Also remove parameters
+            param_key = f"{spectral_line.name}_{comp_name}"
+            if param_key in self.component_parameters:
+                del self.component_parameters[param_key]
+        
+        # Handler for saving component parameters
+        def save_component():
+            if not component_list.currentItem():
+                return
+                
+            old_comp_name = component_list.currentItem().text()
+            new_comp_name = comp_name_input.text()
+            
+            # Update component name if changed
+            if old_comp_name != new_comp_name:
+                # Update in spectral_line.components
+                idx = spectral_line.components.index(old_comp_name)
+                spectral_line.components[idx] = new_comp_name
+                
+                # Update in list widget
+                component_list.currentItem().setText(new_comp_name)
+                
+                # Transfer parameters to new name if they exist
+                old_param_key = f"{spectral_line.name}_{old_comp_name}"
+                if old_param_key in self.component_parameters:
+                    self.component_parameters[f"{spectral_line.name}_{new_comp_name}"] = \
+                        self.component_parameters[old_param_key]
+                    del self.component_parameters[old_param_key]
+            
+            # Save component parameters
+            param_key = f"{spectral_line.name}_{new_comp_name}"
+            self.component_parameters[param_key] = {
+                'z_value': redshift_input.value(),
+                'z_min': redshift_min.value(),
+                'z_max': redshift_max.value(),
+                'sigma_value': sigma_input.value(),
+                'sigma_min': sigma_min.value(),
+                'sigma_max': sigma_max.value(),
+                'flux_value': flux_input.value()
+            }
+        
+        # Connect buttons
+        add_comp_btn.clicked.connect(add_component)
+        remove_comp_btn.clicked.connect(remove_component)
+        save_comp_btn.clicked.connect(save_component)
+        
+        tab_widget.addTab(components_tab, "Components")
+        
+        # Add tabs to main layout
+        main_layout.addWidget(tab_widget)
+        
+        # Dialog buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        main_layout.addWidget(button_box)
+        
+        # Show the dialog
+        if dialog.exec_() == QDialog.Accepted:
+            # Update line properties
+            spectral_line.name = name_input.text()
+            spectral_line.rest_wavelength = wavelength_input.value()
+            
+            # Update doublet info
+            if is_doublet.isChecked():
+                from gaussian_fitfunctions import DoubletInfo
+                spectral_line.doublet = DoubletInfo(
+                    secondary_wavelength=secondary_wavelength.value(),
+                    ratio=ratio_input.value()
+                )
+            else:
+                spectral_line.doublet = None
+                
+            # Update geocoronal flag
+            spectral_line.geocoronal = is_geocoronal.isChecked()
+            
+            # Save updated spectral lines
+            self.save_spectral_lines()
+            
+            # Update the UI to reflect changes
+            self.refresh_line_entries()
+            
+            # Save component parameters to file
+            self.save_component_parameters()
+
+
+    def view_fit_results(self):
+        """Display the fitting results with flux measurements"""
+        if not hasattr(self, 'fit_results'):
+            self.statusBar().showMessage("No fit results available.")
+            return
+        
+        from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QTabWidget, 
+                                QWidget, QTableWidget, QTableWidgetItem,
+                                QHeaderView, QPushButton, QHBoxLayout,
+                                QFileDialog)
+        
+        # Get the fit results
+        fitter = self.fit_results['fitter']
+        mcmc_result = self.fit_results['mcmc_result']
+        
+        # Create dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Fit Results")
+        dialog.setMinimumSize(600, 500)
+        layout = QVBoxLayout(dialog)
+        
+        # Create tabs
+        tabs = QTabWidget()
+        
+        # Flux results tab
+        flux_tab = QWidget()
+        flux_layout = QVBoxLayout(flux_tab)
+        
+        # Create table for flux results
+        flux_table = QTableWidget()
+        flux_table.setColumnCount(6)
+        flux_table.setHorizontalHeaderLabels([
+            "Line", "Component", "Flux", "Error (Low)", "Error (High)", "EW (Å)"
+        ])
+        
+        # Analyze and add results for each line
+        row_count = 0
+        for line in self.spectral_lines:
+            # Calculate line flux
+            line_result = fitter.get_line_flux(mcmc_result, line.name)
+            
+            if not line_result:
+                continue
+            
+            # Add total flux row
+            flux_table.insertRow(row_count)
+            flux_table.setItem(row_count, 0, QTableWidgetItem(line.name))
+            flux_table.setItem(row_count, 1, QTableWidgetItem("Total"))
+            flux_table.setItem(row_count, 2, QTableWidgetItem(f"{line_result['flux']:.3e}"))
+            flux_table.setItem(row_count, 3, QTableWidgetItem(f"{line_result['error_down']:.3e}"))
+            flux_table.setItem(row_count, 4, QTableWidgetItem(f"{line_result['error_up']:.3e}"))
+            flux_table.setItem(row_count, 5, QTableWidgetItem("N/A"))
+            row_count += 1
+            
+            # Add component rows
+            for comp, comp_result in line_result['components'].items():
+                flux_table.insertRow(row_count)
+                flux_table.setItem(row_count, 0, QTableWidgetItem(""))
+                flux_table.setItem(row_count, 1, QTableWidgetItem(comp))
+                flux_table.setItem(row_count, 2, QTableWidgetItem(f"{comp_result['flux']:.3e}"))
+                flux_table.setItem(row_count, 3, QTableWidgetItem(f"{comp_result['error_down']:.3e}"))
+                flux_table.setItem(row_count, 4, QTableWidgetItem(f"{comp_result['error_up']:.3e}"))
+                flux_table.setItem(row_count, 5, QTableWidgetItem("N/A"))
+                row_count += 1
+        
+        # Adjust table layout
+        flux_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        flux_table.horizontalHeader().setStretchLastSection(True)
+        
+        flux_layout.addWidget(flux_table)
+        
+        # Add export button
+        export_btn_layout = QHBoxLayout()
+        export_flux_btn = QPushButton("Export Flux Results")
+        export_btn_layout.addWidget(export_flux_btn)
+        flux_layout.addLayout(export_btn_layout)
+        
+        # Component parameters tab
+        params_tab = QWidget()
+        params_layout = QVBoxLayout(params_tab)
+        
+        # Create table for parameter results
+        params_table = QTableWidget()
+        params_table.setColumnCount(4)
+        params_table.setHorizontalHeaderLabels([
+            "Component", "Parameter", "Value", "Error"
+        ])
+        
+        # Get unique components
+        all_components = set()
+        for line in self.spectral_lines:
+            all_components.update(line.components)
+        
+        # Add rows for each component parameter
+        row_count = 0
+        for comp in sorted(all_components):
+            # Get redshift
+            z_key = f"z_{comp}"
+            if z_key in mcmc_result.var_names:
+                z_percentiles = np.percentile(mcmc_result.flatchain[z_key], [16, 50, 84])
+                z_value = z_percentiles[1]
+                z_error = (z_percentiles[2] - z_percentiles[0]) / 2
+                
+                params_table.insertRow(row_count)
+                params_table.setItem(row_count, 0, QTableWidgetItem(comp))
+                params_table.setItem(row_count, 1, QTableWidgetItem("Redshift"))
+                params_table.setItem(row_count, 2, QTableWidgetItem(f"{z_value:.5f}"))
+                params_table.setItem(row_count, 3, QTableWidgetItem(f"±{z_error:.5f}"))
+                row_count += 1
+            
+            # Get sigma
+            sigma_key = f"sigma_{comp}"
+            if sigma_key in mcmc_result.var_names:
+                sigma_percentiles = np.percentile(mcmc_result.flatchain[sigma_key], [16, 50, 84])
+                sigma_value = sigma_percentiles[1]
+                sigma_error = (sigma_percentiles[2] - sigma_percentiles[0]) / 2
+                
+                params_table.insertRow(row_count)
+                params_table.setItem(row_count, 0, QTableWidgetItem(comp))
+                params_table.setItem(row_count, 1, QTableWidgetItem("Sigma (km/s)"))
+                params_table.setItem(row_count, 2, QTableWidgetItem(f"{sigma_value:.1f}"))
+                params_table.setItem(row_count, 3, QTableWidgetItem(f"±{sigma_error:.1f}"))
+                row_count += 1
+        
+        # Adjust table layout
+        params_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        params_table.horizontalHeader().setStretchLastSection(True)
+        
+        params_layout.addWidget(params_table)
+        
+        # Export parameters button
+        export_params_btn = QPushButton("Export Parameter Results")
+        params_layout.addWidget(export_params_btn)
+        
+        # Add tabs to tab widget
+        tabs.addTab(flux_tab, "Flux Results")
+        tabs.addTab(params_tab, "Component Parameters")
+        
+        # Add tab widget to dialog
+        layout.addWidget(tabs)
+        
+        # Add close button
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        
+        # Define export functions
+        def export_flux_results():
+            file_path, _ = QFileDialog.getSaveFileName(
+                dialog, "Save Flux Results", "", "CSV Files (*.csv);;All Files (*)"
+            )
+            
+            if file_path:
+                import csv
+                with open(file_path, 'w', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Line", "Component", "Flux", "Error (Low)", "Error (High)"])
+                    
+                    for row in range(flux_table.rowCount()):
+                        line_name = flux_table.item(row, 0).text()
+                        component = flux_table.item(row, 1).text()
+                        flux_val = flux_table.item(row, 2).text()
+                        error_low = flux_table.item(row, 3).text()
+                        error_high = flux_table.item(row, 4).text()
+                        
+                        writer.writerow([line_name, component, flux_val, error_low, error_high])
+                
+                self.statusBar().showMessage(f"Flux results exported to {file_path}")
+        
+        def export_parameter_results():
+            file_path, _ = QFileDialog.getSaveFileName(
+                dialog, "Save Parameter Results", "", "CSV Files (*.csv);;All Files (*)"
+            )
+            
+            if file_path:
+                import csv
+                with open(file_path, 'w', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Component", "Parameter", "Value", "Error"])
+                    
+                    for row in range(params_table.rowCount()):
+                        component = params_table.item(row, 0).text()
+                        parameter = params_table.item(row, 1).text()
+                        value = params_table.item(row, 2).text()
+                        error = params_table.item(row, 3).text()
+                        
+                        writer.writerow([component, parameter, value, error])
+
+    def update_flux_results_in_table(self, mcmc_result):
+        """Update the main table with flux results from the fit"""
+        if not hasattr(self, 'fit_results'):
+            return
+        
+        fitter = self.fit_results['fitter']
+        
+        # Process each line in the table
+        for row in range(self.table.rowCount()):
+            line_item = self.table.item(row, 0)
+            if not line_item:
+                continue
+                
+            line_name = line_item.text()
+            
+            # Find matching spectral line
+            matching_line = None
+            for line in self.spectral_lines:
+                if line.name == line_name:
+                    matching_line = line
+                    break
+            
+            if not matching_line:
+                continue
+            
+            # Get flux results for this line
+            line_result = fitter.get_line_flux(mcmc_result, line_name)
+            
+            if not line_result:
+                continue
+            
+            # Update flux and error in the table
+            flux_value = line_result['flux']
+            flux_error = max(line_result['error_up'], line_result['error_down'])
+            
+            self.table.setItem(row, 1, QTableWidgetItem(f"{flux_value:.3e}"))
+            self.table.setItem(row, 2, QTableWidgetItem(f"{flux_error:.3e}"))
+            
+            # If we have parameters for this line, update them too
+            # For simplicity, assume we've saved component parameters
+            for comp in matching_line.components:
+                z_key = f"z_{comp}"
+                sigma_key = f"sigma_{comp}"
+                
+                if z_key in mcmc_result.var_names and sigma_key in mcmc_result.var_names:
+                    z_value = np.median(mcmc_result.flatchain[z_key])
+                    sigma_value = np.median(mcmc_result.flatchain[sigma_key])
+                    
+                    param_key = f"{line_name}_{comp}"
+                    if not hasattr(self, 'component_parameters'):
+                        self.component_parameters = {}
+                    
+                    self.component_parameters[param_key] = {
+                        'z_value': z_value,
+                        'z_min': max(0, z_value - 0.05),
+                        'z_max': z_value + 0.05,
+                        'sigma_value': sigma_value,
+                        'sigma_min': 10,
+                        'sigma_max': sigma_value * 2,
+                        'flux_value': line_result['components'].get(comp, {}).get('flux', 100)
+                    }
+                    
+            # Save the updated parameters
+            self.save_component_parameters()
+        
+        # Update the objects table if a row is selected
+        selected_rows = self.objects_table.selectionModel().selectedRows()
+        if selected_rows:
+            row_index = selected_rows[0].row()
+            self.update_object_row_from_line_values(row_index)
+    def plot_fit_results(self):
+        """Plot the fitting results"""
+        if not hasattr(self, 'fit_results'):
+            return
+        
+        # Get the fit results
+        fitter = self.fit_results['fitter']
+        mcmc_result = self.fit_results['mcmc_result']
+        region = self.fit_results['region']
+        
+        # Get wavelength, flux, and error arrays
+        wave = self.coadded_spectrum['wave']
+        flux = self.coadded_spectrum['flux']
+        error = (self.coadded_spectrum['error_up'] + self.coadded_spectrum['error_down']) / 2
+        
+        # Plot the results
+        fig, axes = fitter.plot_joint_fit(
+            mcmc_result,
+            wave=wave,
+            flux=flux,
+            error=error,
+            use_mcmc_median=True,
+            show_components=True
+        )
+        
+        # Apply the plot to our main figure
+        self.figure.clear()
+        self.ax = self.figure.add_subplot(111)
+        
+        # Copy the first axis (we only have one region)
+        region_ax = axes[0] if isinstance(axes, list) else axes
+        
+        # Get lines and artists from the region plot
+        for line in region_ax.get_lines():
+            self.ax.add_line(line.copy())
+        
+        for collection in region_ax.collections:
+            self.ax.add_collection(collection.copy())
+        
+        for patch in region_ax.patches:
+            self.ax.add_patch(patch.copy())
+        
+        # Copy axis properties
+        self.ax.set_xlim(region_ax.get_xlim())
+        self.ax.set_ylim(region_ax.get_ylim())
+        self.ax.set_xlabel(region_ax.get_xlabel())
+        self.ax.set_ylabel(region_ax.get_ylabel())
+        self.ax.set_title("Spectral Fit")
+        
+        # Add legend
+        handles, labels = region_ax.get_legend_handles_labels()
+        self.ax.legend(handles, labels, loc='best')
+        
+        self.canvas.draw()
+    def fit_gaussian_model(self):
+        """Perform fitting using the JointSpectralFitter class"""
+        if not self.spectral_lines:
+            self.statusBar().showMessage("No spectral lines to fit. Please add lines first.")
+            return
+            
+        if not self.coadded_spectrum:
+            self.statusBar().showMessage("No spectrum loaded. Please load a spectrum first.")
+            return
+        
+        # Load component parameters if not already loaded
+        if not hasattr(self, 'component_parameters'):
+            self.load_component_parameters()
+        
+        # First, we need to create SpectralRegion objects based on our lines
+        from gaussian_fitfunctions import SpectralRegion
+        
+        # For simplicity, we'll create one region that spans all lines
+        min_wave = float('inf')
+        max_wave = float('-inf')
+        
+        for line in self.spectral_lines:
+            # Calculate the observed wavelength based on redshift
+            obs_wavelength = line.rest_wavelength * (1 + self.redshift)
+            
+            # Update min/max wavelength with some padding
+            min_wave = min(min_wave, obs_wavelength - 50)
+            max_wave = max(max_wave, obs_wavelength + 50)
+            
+            # Also handle doublet if present
+            if line.doublet:
+                obs_doublet = line.doublet.secondary_wavelength * (1 + self.redshift)
+                min_wave = min(min_wave, obs_doublet - 50)
+                max_wave = max(max_wave, obs_doublet + 50)
+        
+        # Create a single region with all lines
+        region = SpectralRegion(
+            wave_min=min_wave,
+            wave_max=max_wave,
+            lines=self.spectral_lines
+        )
+        
+        # Create the JointSpectralFitter
+        from gaussian_fitfunctions import JointSpectralFitter
+        fitter = JointSpectralFitter(
+            z=self.redshift,
+            regions=[region]
+        )
+        
+        # Prepare parameter constraints based on saved component parameters
+        parameter_constraints = {}
+        
+        # Process each line and component
+        for line in self.spectral_lines:
+            for comp in line.components:
+                # Get parameter key
+                param_key = f"{line.name}_{comp}"
+                
+                # Set constraints for this component if saved
+                if param_key in self.component_parameters:
+                    params = self.component_parameters[param_key]
+                    
+                    # Redshift constraints
+                    z_name = f"z_{comp}"
+                    parameter_constraints[z_name] = {
+                        'value': params.get('z_value', self.redshift),
+                        'min': params.get('z_min', max(0, self.redshift - 0.05)),
+                        'max': params.get('z_max', self.redshift + 0.05),
+                        'vary': True
+                    }
+                    
+                    # Sigma constraints
+                    sigma_name = f"sigma_{comp}"
+                    parameter_constraints[sigma_name] = {
+                        'value': params.get('sigma_value', 200),
+                        'min': params.get('sigma_min', 10),
+                        'max': params.get('sigma_max', 1000),
+                        'vary': True
+                    }
+                    
+                    # Flux constraints
+                    flux_name = f"flux_{line.name}_{comp}"
+                    parameter_constraints[flux_name] = {
+                        'value': params.get('flux_value', 100),
+                        'min': 0,
+                        'vary': True
+                    }
+        
+        # Set up continuum parameters for the region
+        parameter_constraints[f'm_0'] = {'value': 0, 'vary': True}
+        parameter_constraints[f'c_0'] = {'value': 0, 'vary': True}
+        
+        # Get wavelength, flux, and error arrays from the loaded spectrum
+        wave = self.coadded_spectrum['wave']
+        flux = self.coadded_spectrum['flux']
+        error = (self.coadded_spectrum['error_up'] + self.coadded_spectrum['error_down']) / 2
+        
+        # Show a status message
+        self.statusBar().showMessage("Performing initial fit...")
+        
+        # Perform initial fit
+        try:
+            initial_fit = fitter.fit_regions(
+                wave=wave,
+                flux=flux,
+                error=error,
+                parameter_constraints=parameter_constraints
+            )
+            
+            self.statusBar().showMessage("Initial fit complete. Running MCMC...")
+            
+            # Perform MCMC fit
+            mcmc_result = fitter.mcmc_joint_fit(
+                wave=wave,
+                flux=flux,
+                error=error,
+                initial_fit=initial_fit,
+                steps=1000,  # Adjust as needed
+                burn=100,
+                thin=15,
+                parameter_constraints=parameter_constraints
+            )
+            
+            # Store the results
+            self.fit_results = {
+                'initial_fit': initial_fit,
+                'mcmc_result': mcmc_result,
+                'fitter': fitter,
+                'region': region
+            }
+            
+            # Plot the results
+            self.plot_fit_results()
+            
+            # Enable the View Results button
+            self.view_results_button.setEnabled(True)
+            
+            self.statusBar().showMessage("Fitting complete!")
+            
+        except Exception as e:
+            import traceback
+            print(traceback.format_exc())
+            self.statusBar().showMessage(f"Error during fitting: {str(e)}")
+    def refresh_line_entries(self):
+        """Refresh all line entries in the UI"""
+        # Save current lines
+        current_lines = self.spectral_lines.copy()
+        
+        # Clear existing entries
+        self.clear_line_entries()
+        
+        # Re-create entries for each line
+        for line in current_lines:
+            self.create_line_entry_from_spectral_line(line)
+    def load_spectral_lines(self):
+        """Load spectral lines from the CSV file and create UI entries"""
+        import csv
+        import os
+        
+        csv_path = os.path.join("internal", "spectral_lines.csv")
+        
+        if not os.path.exists(csv_path):
+            # No saved lines yet
+            return
+        
+        # Clear existing lines
+        self.spectral_lines = []
+        self.clear_line_entries()
+        
+        # Load from CSV
+        with open(csv_path, 'r') as f:
+            reader = csv.reader(f)
+            
+            # Skip header
+            next(reader, None)
+            
+            for row in reader:
+                if len(row) >= 6:
+                    name = row[0]
+                    rest_wavelength = float(row[1])
+                    components = row[2].split(",") if row[2] else ["narrow"]
+                    
+                    # Parse doublet info
+                    doublet_info = None
+                    if row[3] and row[4]:
+                        doublet_info = {
+                            "secondary_wavelength": float(row[3]),
+                            "ratio": float(row[4])
+                        }
+                    
+                    # Parse geocoronal flag
+                    geocoronal = row[5].lower() == "true"
+                    
+                    # Create line entry
+                    from gaussian_fitfunctions import SpectralLine, DoubletInfo
+                    
+                    # Create DoubletInfo object if needed
+                    doublet = None
+                    if doublet_info:
+                        doublet = DoubletInfo(
+                            secondary_wavelength=doublet_info["secondary_wavelength"],
+                            ratio=doublet_info["ratio"]
+                        )
+                    
+                    # Create the SpectralLine object
+                    spectral_line = SpectralLine(
+                        rest_wavelength=rest_wavelength,
+                        name=name,
+                        components=components,
+                        doublet=doublet,
+                        geocoronal=geocoronal
+                    )
+                    
+                    # Add to the UI
+                    self.create_line_entry_from_spectral_line(spectral_line)
+        
+        self.statusBar().showMessage(f"Loaded {len(self.spectral_lines)} spectral lines from {csv_path}")
+
+    def create_line_entry_from_spectral_line(self, spectral_line):
+        """Create a UI entry from an existing SpectralLine object"""
+        from PyQt5.QtWidgets import QFrame, QLabel, QPushButton, QHBoxLayout
+        
+        # Store the spectral line
+        self.spectral_lines.append(spectral_line)
+        
+        # Create visual frame
+        line_entry = QFrame()
+        line_entry.setFrameShape(QFrame.StyledPanel)
+        line_entry.setFrameShadow(QFrame.Raised)
+        line_entry.setStyleSheet("background-color: #f0f0f0;")
+        line_entry.setMinimumHeight(40)
+        line_entry.setMaximumHeight(40)
+        
+        entry_layout = QHBoxLayout(line_entry)
+        entry_layout.setContentsMargins(10, 5, 10, 5)
+        
+        # Display format: Name - Wavelength
+        if spectral_line.doublet:
+            display_text = f"{spectral_line.name} ({spectral_line.rest_wavelength:.2f}, {spectral_line.doublet.secondary_wavelength:.2f} Å)"
+        else:
+            display_text = f"{spectral_line.name} ({spectral_line.rest_wavelength:.2f} Å)"
+            
+        line_label = QLabel(display_text)
+        entry_layout.addWidget(line_label)
+        
+        entry_layout.addStretch()
+        
+        # Store a reference to the spectral line object in the widget
+        line_entry.spectral_line = spectral_line
+        
+        view_params_button = QPushButton("Parameters")
+        view_params_button.clicked.connect(lambda: self.view_line_parameters(spectral_line))
+        entry_layout.addWidget(view_params_button)
+        
+        # Remove the stretch from the end of line_entries_layout
+        if self.line_entries_layout.count() > 0:
+            item = self.line_entries_layout.itemAt(self.line_entries_layout.count() - 1)
+            if item and item.spacerItem():
+                self.line_entries_layout.removeItem(item)
+        
+        # Add the line entry
+        self.line_entries_layout.addWidget(line_entry)
+        self.line_entries_layout.addStretch()
+        
+        # Enable the fit button if we have at least one line
+        self.fit_model_button.setEnabled(True)
+    def add_gaussian_line(self):
+        """Open a dialog to add a new spectral line for fitting"""
+        from PyQt5.QtWidgets import (QDialog, QFormLayout, QDialogButtonBox, 
+                                    QComboBox, QLineEdit, QCheckBox, QDoubleSpinBox)
+        
+        # Create directory for internal storage if it doesn't exist
+        os.makedirs("internal", exist_ok=True)
+        
+        # Create the dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add Spectral Line")
+        layout = QFormLayout(dialog)
+        
+        # Line name input
+        name_input = QLineEdit()
+        layout.addRow("Line Name:", name_input)
+        
+        # Rest wavelength input
+        wavelength_input = QDoubleSpinBox()
+        wavelength_input.setRange(1000, 10000)
+        wavelength_input.setValue(1215.67)  # Default to Lyman-alpha
+        wavelength_input.setDecimals(2)
+        layout.addRow("Rest Wavelength (Å):", wavelength_input)
+        
+        # Doublet option
+        is_doublet = QCheckBox("Is this a doublet?")
+        is_doublet.stateChanged.connect(lambda state: secondary_wavelength.setEnabled(state))
+        is_doublet.stateChanged.connect(lambda state: ratio_input.setEnabled(state))
+        layout.addRow(is_doublet)
+        
+        # Secondary wavelength (for doublets)
+        secondary_wavelength = QDoubleSpinBox()
+        secondary_wavelength.setRange(1000, 10000)
+        secondary_wavelength.setValue(1215.67 + 5)  # Default slightly higher
+        secondary_wavelength.setDecimals(2)
+        secondary_wavelength.setEnabled(False)
+        layout.addRow("Secondary Wavelength (Å):", secondary_wavelength)
+        
+        # Flux ratio (for doublets)
+        ratio_input = QDoubleSpinBox()
+        ratio_input.setRange(0.01, 10)
+        ratio_input.setValue(0.5)  # Default ratio
+        ratio_input.setDecimals(3)
+        ratio_input.setEnabled(False)
+        layout.addRow("Flux Ratio (secondary/primary):", ratio_input)
+        
+        # Geocoronal option
+        is_geocoronal = QCheckBox("Is this a geocoronal line?")
+        layout.addRow(is_geocoronal)
+        
+        # Add default component
+        layout.addRow(QLabel("Default component will be added automatically"))
+        
+        # Dialog buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addRow(button_box)
+        
+        # Show the dialog and process result
+        if dialog.exec_() == QDialog.Accepted:
+            line_name = name_input.text()
+            rest_wavelength = wavelength_input.value()
+            
+            # Create doublet info if needed
+            doublet_info = None
+            if is_doublet.isChecked():
+                doublet_info = {
+                    "secondary_wavelength": secondary_wavelength.value(),
+                    "ratio": ratio_input.value()
+                }
+            
+            # Create the line entry
+            self.create_spectral_line_entry(
+                line_name, 
+                rest_wavelength, 
+                doublet_info, 
+                is_geocoronal.isChecked()
+            )
+            
+            # Save to CSV
+            self.save_spectral_lines()
     def clear_line_entries(self):
         if hasattr(self, 'line_entries_layout'):
             while self.line_entries_layout.count():
@@ -1080,8 +2182,8 @@ class SpectralFluxApp(QMainWindow):
                     child = item.layout().takeAt(0)
                     if child.widget():
                         child.widget().deleteLater()
-    def view_line_parameters(self, line_name):
-        QMessageBox.information(self, "Line Parameters", f"Parameters for {line_name} - placeholder")
+    # def view_line_parameters(self, line_name):
+    #     QMessageBox.information(self, "Line Parameters", f"Parameters for {line_name} - placeholder")
 
     def save_spectrum(self):
         if self.coadded_spectrum is None:
