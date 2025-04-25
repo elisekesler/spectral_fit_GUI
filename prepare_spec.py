@@ -24,36 +24,62 @@ def prepare(file):
     spec = Table.read(file)
 
     spec_formatted = Table()
-    
-    spec_formatted['wave'] = np.array(spec['WAVELENGTH'][0])
-    spec_formatted['flux'] = np.array(spec['FLUX'][0])
-    spec_formatted['flag'] = np.array(spec['DQ'][0])
-    
-    if (spec['EXPTIME'].shape != (1,)):
-        spec_formatted['exp_time'] = np.array(np.max(spec['EXPTIME']))
-        
-    else: 
-        spec_formatted['exp_time'] = np.array(spec['EXPTIME'])
-    spec_formatted['error_upper'] = np.array(spec['ERROR'][0])
-    spec_formatted['error_lower'] = np.array(spec['ERROR_LOWER'][0])
-    spec_formatted['G230L_error_up'] = np.zeros_like(spec_formatted['error_lower'])
-    spec_formatted['G230L_error_down'] = np.zeros_like(spec_formatted['error_lower'])
-    spec_formatted['gcounts'] = np.array(spec['GCOUNTS'][0])
-    spec_formatted['background'] = np.array(spec['BACKGROUND'][0])
-    spec_formatted['net'] = np.array(spec['NET'][0])
 
-    net_exp_array = np.array(spec['NET'][0])*spec_formatted['exp_time'][0] 
-    bkg_exp_array = np.array(spec['BACKGROUND'][0])*spec_formatted['exp_time'][0] 
-    spec_formatted['bkg_times_exp'] = np.nan_to_num(bkg_exp_array)
-    spec_formatted['net_times_exp_time'] = np.nan_to_num(net_exp_array)
-    
-    variance_flat = np.array(spec['VARIANCE_FLAT'][0])
-    flags = spec_formatted['flag']
-    mask = np.where((flags == 0) | (flags == 4))
-    masked_spec = spec_formatted[(mask)]
+    if spec['DQ'][0] == 55:
+        # this is the flag for a test spectrum. maybe not the best way to do it, but it works
+        spec['DQ'][0] = 0
+        spec_formatted['wave'] = np.array(spec['WAVELENGTH'])
+        spec_formatted['flux'] = np.array(spec['FLUX'])
+        spec_formatted['flag'] = np.array(spec['DQ'])
+        spec_formatted['exp_time'] = np.array(spec['EXPTIME'])
+
+        spec_formatted['error_upper'] = np.array(spec['ERROR'])
+        spec_formatted['error_lower'] = np.array(spec['ERROR_LOWER'])
+        spec_formatted['G230L_error_up'] = np.zeros_like(spec_formatted['error_lower'])
+        spec_formatted['G230L_error_down'] = np.zeros_like(spec_formatted['error_lower'])
+        spec_formatted['gcounts'] = np.array(spec['GCOUNTS'])
+        spec_formatted['background'] = np.array(spec['BACKGROUND'])
+        spec_formatted['net'] = np.array(spec['NET'])
+        net_exp_array = np.array(spec['NET'])*spec_formatted['exp_time'] 
+        bkg_exp_array = np.array(spec['BACKGROUND'])*spec_formatted['exp_time']
+        variance_flat = np.array(spec['VARIANCE_FLAT'])
+        spec_formatted['bkg_times_exp'] = np.nan_to_num(bkg_exp_array)
+        spec_formatted['net_times_exp_time'] = np.nan_to_num(net_exp_array)
+        
+        flags = spec_formatted['flag']
+        mask = np.where((flags == 0) | (flags == 4))
+        masked_spec = spec_formatted[(mask)]
+    else:
+
+        spec_formatted['wave'] = np.array(spec['WAVELENGTH'][0])
+        spec_formatted['flux'] = np.array(spec['FLUX'][0])
+        spec_formatted['flag'] = np.array(spec['DQ'][0])
+        
+        if (spec['EXPTIME'].shape != (1,)):
+            spec_formatted['exp_time'] = np.array(np.max(spec['EXPTIME']))
+            
+        else: 
+            spec_formatted['exp_time'] = np.array(spec['EXPTIME'])
+        
+        spec_formatted['error_upper'] = np.array(spec['ERROR'][0])
+        spec_formatted['error_lower'] = np.array(spec['ERROR_LOWER'][0])
+        spec_formatted['G230L_error_up'] = np.zeros_like(spec_formatted['error_lower'])
+        spec_formatted['G230L_error_down'] = np.zeros_like(spec_formatted['error_lower'])
+        spec_formatted['gcounts'] = np.array(spec['GCOUNTS'][0])
+        spec_formatted['background'] = np.array(spec['BACKGROUND'][0])
+        spec_formatted['net'] = np.array(spec['NET'][0])
+        net_exp_array = np.array(spec['NET'][0])*spec_formatted['exp_time'][0] 
+        bkg_exp_array = np.array(spec['BACKGROUND'][0])*spec_formatted['exp_time'][0] 
+        variance_flat = np.array(spec['VARIANCE_FLAT'][0])
+
+        spec_formatted['bkg_times_exp'] = np.nan_to_num(bkg_exp_array)
+        spec_formatted['net_times_exp_time'] = np.nan_to_num(net_exp_array)
+        
+        flags = spec_formatted['flag']
+        mask = np.where((flags == 0) | (flags == 4))
+        masked_spec = spec_formatted[(mask)]
     
     return masked_spec 
-    
 
 
 # In[64]:
