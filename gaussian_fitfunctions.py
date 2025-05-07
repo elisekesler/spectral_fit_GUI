@@ -916,8 +916,8 @@ class JointSpectralFitter(SpectralFitter):
             
             # Plot data
             plot_flux = region_flux - continuum if subtract_continuum else region_flux
-            ax.errorbar(region_wave, plot_flux, yerr=region_error, 
-                    color='black', drawstyle='steps-mid', alpha=0.5, label='Data')
+            # ax.errorbar(region_wave, plot_flux, yerr=region_error, 
+            #         color='black', drawstyle='steps-mid', alpha=0.5, label='Data')
             
             # Calculate and plot total model
             model_comp = {}
@@ -985,7 +985,7 @@ class JointSpectralFitter(SpectralFitter):
             #     fits_file.to_csv(f'{save_file}_{line.name}.csv', index=False)
             #     print(f'Saving to {save_file}_{line.name}.csv with EW = {ew:.2f} Å')
             # Plot total model
-            ax.plot(region_wave, total_model, 'r-', label='Model', lw=2)
+            # ax.plot(region_wave, total_model, 'r-', label='Model', lw=2)
             
             # Plot components if requested
             if show_components:
@@ -1027,6 +1027,87 @@ class JointSpectralFitter(SpectralFitter):
         else:
             print(f'not saving equivalent widths')
             return fig, axes
+    def get_gaussian_models(self, result, wave: np.ndarray, use_mcmc_median: bool = True):
+        """
+        Calculate Gaussian models for plotting without creating a new figure
+        
+        Args:
+            result: Fit result from fit_regions or mcmc_joint_fit
+            wave: Wavelength array
+            use_mcmc_median: Whether to use MCMC median parameters (if available)
+            
+        Returns:
+            Dictionary containing model data for each region and component
+        """
+        models_data = {}
+        
+        # Process each region
+        for i, region in enumerate(self.regions):
+            # Create mask for this region
+            mask = (wave >= region.wave_min) & (wave <= region.wave_max)
+            region_wave = wave[mask]
+            
+            # Get parameters (either MCMC median or best fit)
+            if use_mcmc_median and hasattr(result, 'flatchain'):
+                params = result.params.copy()
+                for name in result.var_names:
+                    params[name].value = np.median(result.flatchain[name])
+            else:
+                params = result.params
+            
+            # Get continuum for this region
+            slope = params[f'm_{i}'].value
+            intercept = params[f'c_{i}'].value
+            continuum = slope * region_wave + intercept
+            
+            # Calculate total model and components
+            models_data[f'region_{i}'] = {
+                'wave': region_wave,
+                'continuum': continuum,
+                'total_model': np.zeros_like(region_wave) + continuum,  # Start with continuum
+                'components': {}
+            }
+            
+            # Add lines
+            for line in region.lines:
+                # Initialize line model for this specific line
+                line_model = np.zeros_like(region_wave)
+                
+                for comp in line.components:
+                    z = params[f'z_{comp}'].value
+                    sigma = params[f'sigma_{comp}'].value
+                    flux_val = params[f'flux_{line.name}_{comp}'].value
+                    
+                    # Calculate component model
+                    component_model = self._gaussian(
+                        region_wave,
+                        line.rest_wavelength,
+                        z, sigma, flux_val,
+                        doublet=line.doublet,
+                        geocoronal=line.geocoronal
+                    )
+                    
+                    # Add to total model
+                    models_data[f'region_{i}']['total_model'] += component_model
+                    
+                    # Store component model
+                    component_key = f'{line.name}_{comp}'
+                    models_data[f'region_{i}']['components'][component_key] = {
+                        'model': component_model,
+                        'params': {
+                            'z': z,
+                            'sigma': sigma,
+                            'flux': flux_val
+                        }
+                    }
+                    
+                    # Add to line-specific model
+                    line_model += component_model
+                
+                # Store combined line model (all components for this line)
+                models_data[f'region_{i}'][f'line_{line.name}'] = line_model
+            
+        return models_data
     def print_all_line_fluxes(self, mcmc_result):
         """
         Print fluxes and errors for all lines in all regions from MCMC results
