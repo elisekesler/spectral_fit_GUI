@@ -270,7 +270,6 @@ def coadd(combined_table, delta, subtract_background=False):
               pixel['error_poisson_down'] = 0 
 
     good_errors = coadded_spectrum[np.isfinite(coadded_spectrum['error_poisson_up'])]
-    print(good_errors['error_poisson_up'])
     for pixel in coadded_spectrum:
         if np.isnan(pixel['error_poisson_up']):
       
@@ -290,5 +289,8 @@ def coadd(combined_table, delta, subtract_background=False):
         if np.isnan(pixel['net_times_exp']):
             print(f'pixel had nan net*exp, setting that one to 0')
             pixel['net_times_exp'] = 0.0
+
+    coadded_spectrum['error_up'] = coadded_spectrum['error_poisson_up']
+    coadded_spectrum['error_down'] = coadded_spectrum['error_poisson_down']
 
     return coadded_spectrum

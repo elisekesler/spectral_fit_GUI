@@ -12,16 +12,7 @@ import matplotlib.pyplot as plt
 import logging
 import logging.handlers as handlers
 
-from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QPushButton, QWidget,
-    QFileDialog, QLabel, QHBoxLayout, QProgressBar,
-    QInputDialog, QMessageBox, QComboBox, QTableWidget,
-    QTableWidgetItem, QSizePolicy, QFrame, QScrollArea,
-    QDialog, QFormLayout, QDialogButtonBox,
-    QLineEdit, QCheckBox, QDoubleSpinBox,
-    QVBoxLayout, QRadioButton, QButtonGroup, QGroupBox,
-    QTabWidget,  QListWidget, QListWidgetItem, QHeaderView,
-)
+from PyQt5.QtWidgets import *
 from gaussian_fitfunctions import SpectralLine, DoubletInfo
 import csv
 from astropy.stats import poisson_conf_interval as pcf
@@ -33,6 +24,171 @@ from gaussian_fitfunctions import SpectralRegion
 from matplotlib.figure import Figure
 from prepare_spec import coadd, prepare, prepare_other_grating, combine_tables
 import pickle
+
+class GaussianWindow(QWidget):
+    """
+    This "window" is a QWidget. Since it has no parent, it
+    will appear as a free-floating window for comparison w/ other flux
+    results. (THEORETICALLY. in reality it does not work.)
+    """
+    def __init__(self, fitter, mcmc_result, spectral_lines):
+        super().__init__()
+        print(f'GaussianWindow init')
+        # layout = QVBoxLayout()
+        label = QLabel("Gaussian Fit Results")
+        # layout.addWidget(self.label)
+        # self.setLayout(layout)
+        
+        # # Create tabs
+        # tabs = QTabWidget()
+        
+        # # Flux results tab
+        # flux_tab = QWidget()
+        # flux_layout = QVBoxLayout(flux_tab)
+        
+        # # Create table for flux results
+        # flux_table = QTableWidget()
+        # flux_table.setColumnCount(6)
+        # flux_table.setHorizontalHeaderLabels([
+        #     "Line", "Component", "Flux", "Error (Low)", "Error (High)", "EW (Å)"
+        # ])
+        
+        # # Analyze and add results for each line
+        # row_count = 0
+        # for line in spectral_lines:
+        #     # Calculate line flux
+        #     line_result = fitter.get_line_flux(mcmc_result, line.name)
+            
+        #     if not line_result:
+        #         continue
+            
+        #     # Add total flux row
+        #     flux_table.insertRow(row_count)
+        #     flux_table.setItem(row_count, 0, QTableWidgetItem(line.name))
+        #     flux_table.setItem(row_count, 1, QTableWidgetItem("Total"))
+        #     flux_table.setItem(row_count, 2, QTableWidgetItem(f"{line_result['flux']:.3e}"))
+        #     flux_table.setItem(row_count, 3, QTableWidgetItem(f"{line_result['error_down']:.3e}"))
+        #     flux_table.setItem(row_count, 4, QTableWidgetItem(f"{line_result['error_up']:.3e}"))
+        #     flux_table.setItem(row_count, 5, QTableWidgetItem("N/A"))
+        #     row_count += 1
+            
+        #     # Add component rows
+        #     for comp, comp_result in line_result['components'].items():
+        #         flux_table.insertRow(row_count)
+        #         flux_table.setItem(row_count, 0, QTableWidgetItem(""))
+        #         flux_table.setItem(row_count, 1, QTableWidgetItem(comp))
+        #         flux_table.setItem(row_count, 2, QTableWidgetItem(f"{comp_result['flux']:.3e}"))
+        #         flux_table.setItem(row_count, 3, QTableWidgetItem(f"{comp_result['error_down']:.3e}"))
+        #         flux_table.setItem(row_count, 4, QTableWidgetItem(f"{comp_result['error_up']:.3e}"))
+        #         flux_table.setItem(row_count, 5, QTableWidgetItem("N/A"))
+        #         row_count += 1
+        
+        # # Adjust table layout
+        # flux_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # flux_table.horizontalHeader().setStretchLastSection(True)
+        
+        # flux_layout.addWidget(flux_table)
+        
+        # # Add export button
+        # export_btn_layout = QHBoxLayout()
+        # export_flux_btn = QPushButton("Export Flux Results")
+        # export_btn_layout.addWidget(export_flux_btn)
+        # flux_layout.addLayout(export_btn_layout)
+        
+        # # Component parameters tab
+        # params_tab = QWidget()
+        # params_layout = QVBoxLayout(params_tab)
+        
+        # # Create table for parameter results
+        # params_table = QTableWidget()
+        # params_table.setColumnCount(4)
+        # params_table.setHorizontalHeaderLabels([
+        #     "Component", "Parameter", "Value", "Error"
+        # ])
+        
+        # # Get unique components
+        # all_components = set()
+        # for line in spectral_lines:
+        #     all_components.update(line.components)
+        
+        # # Add rows for each component parameter
+        # row_count = 0
+        # for comp in sorted(all_components):
+        #     # Get redshift
+        #     z_key = f"z_{comp}"
+        #     if z_key in mcmc_result.var_names:
+        #         z_percentiles = np.percentile(mcmc_result.flatchain[z_key], [16, 50, 84])
+        #         z_value = z_percentiles[1]
+        #         z_error = (z_percentiles[2] - z_percentiles[0]) / 2
+                
+        #         params_table.insertRow(row_count)
+        #         params_table.setItem(row_count, 0, QTableWidgetItem(comp))
+        #         params_table.setItem(row_count, 1, QTableWidgetItem("Redshift"))
+        #         params_table.setItem(row_count, 2, QTableWidgetItem(f"{z_value:.5f}"))
+        #         params_table.setItem(row_count, 3, QTableWidgetItem(f"±{z_error:.5f}"))
+        #         row_count += 1
+            
+        #     # Get sigma
+        #     sigma_key = f"sigma_{comp}"
+        #     if sigma_key in mcmc_result.var_names:
+        #         sigma_percentiles = np.percentile(mcmc_result.flatchain[sigma_key], [16, 50, 84])
+        #         sigma_value = sigma_percentiles[1]
+        #         sigma_error = (sigma_percentiles[2] - sigma_percentiles[0]) / 2
+                
+        #         params_table.insertRow(row_count)
+        #         params_table.setItem(row_count, 0, QTableWidgetItem(comp))
+        #         params_table.setItem(row_count, 1, QTableWidgetItem("Sigma (km/s)"))
+        #         params_table.setItem(row_count, 2, QTableWidgetItem(f"{sigma_value:.1f}"))
+        #         params_table.setItem(row_count, 3, QTableWidgetItem(f"±{sigma_error:.1f}"))
+        #         row_count += 1
+        
+        # # Adjust table layout
+        # params_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # params_table.horizontalHeader().setStretchLastSection(True)
+        
+        # params_layout.addWidget(params_table)
+        
+        # # Export parameters button
+        # export_params_btn = QPushButton("Export Parameter Results")
+        # params_layout.addWidget(export_params_btn)
+        
+        # # Add tabs to tab widget
+        # tabs.addTab(flux_tab, "Flux Results")
+        # tabs.addTab(params_tab, "Component Parameters")
+        
+        # # Add tab widget to dialog
+        # layout.addWidget(tabs)
+        
+        # Add close button
+        # close_btn = QPushButton("Close")
+        # close_btn.clicked.connect(dialog.accept)
+        # layout.addWidget(close_btn)
+        
+        # Define export functions
+        def export_flux_results():
+            print(f'buggy for now')
+            # file_path, _ = QFileDialog.getSaveFileName(
+            #     dialog, "Save Flux Results", "", "CSV Files (*.csv);;All Files (*)"
+            # )
+            
+            # if file_path:
+            #     import csv
+            #     with open(file_path, 'w', newline='') as f:
+            #         writer = csv.writer(f)
+            #         writer.writerow(["Line", "Component", "Flux", "Error (Low)", "Error (High)"])
+                    
+            #         for row in range(flux_table.rowCount()):
+            #             line_name = flux_table.item(row, 0).text()
+            #             component = flux_table.item(row, 1).text()
+            #             flux_val = flux_table.item(row, 2).text()
+            #             error_low = flux_table.item(row, 3).text()
+            #             error_high = flux_table.item(row, 4).text()
+                        
+            #             writer.writerow([line_name, component, flux_val, error_low, error_high])
+                
+            #     self.statusBar().showMessage(f"Flux results exported to {file_path}")
+        
+
 
 class SpectralFluxApp(QMainWindow):
     # Main app with all the doohickeys and functionalities
@@ -1030,12 +1186,7 @@ class SpectralFluxApp(QMainWindow):
         except ValueError:
             self.statusBar().showMessage('Invalid scale value')
             self.scale_input.setText(f"{self.scale_value:.2e}")  # Revert with scientific notation
-    # Add placeholder functions for Gaussian Fit mode
-    # def fit_gaussian_model(self):
-    #     self.statusBar().showMessage("Gaussian model fitting - placeholder")
 
-    # def view_fit_results(self):
-    #     self.statusBar().showMessage("View fit results - placeholder")
     def create_spectral_line_entry(self, name, rest_wavelength, doublet_info=None, geocoronal=False):
         """Create a visual entry for a spectral line and add to the UI"""
         print(f'CREATING SPECTRAL LINE ENTRY: {name}, {rest_wavelength}, {doublet_info}, {geocoronal}')
@@ -1607,179 +1758,183 @@ class SpectralFluxApp(QMainWindow):
         # Get the fit results
         fitter = self.fit_results['fitter']
         mcmc_result = self.fit_results['mcmc_result']
+
+        print(f'In this function, now attempting to open Gaussian Window')
         
+        new_window = GaussianWindow(fitter, mcmc_result, self.spectral_lines)
+        new_window.show()
         # Create dialog
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Fit Results")
-        dialog.setMinimumSize(600, 500)
-        layout = QVBoxLayout(dialog)
+        # dialog = QDialog(self)
+        # dialog.setWindowTitle("Fit Results")
+        # dialog.setMinimumSize(600, 500)
+        # layout = QVBoxLayout(dialog)
         
-        # Create tabs
-        tabs = QTabWidget()
+        # # Create tabs
+        # tabs = QTabWidget()
         
-        # Flux results tab
-        flux_tab = QWidget()
-        flux_layout = QVBoxLayout(flux_tab)
+        # # Flux results tab
+        # flux_tab = QWidget()
+        # flux_layout = QVBoxLayout(flux_tab)
         
-        # Create table for flux results
-        flux_table = QTableWidget()
-        flux_table.setColumnCount(6)
-        flux_table.setHorizontalHeaderLabels([
-            "Line", "Component", "Flux", "Error (Low)", "Error (High)", "EW (Å)"
-        ])
+        # # Create table for flux results
+        # flux_table = QTableWidget()
+        # flux_table.setColumnCount(6)
+        # flux_table.setHorizontalHeaderLabels([
+        #     "Line", "Component", "Flux", "Error (Low)", "Error (High)", "EW (Å)"
+        # ])
         
-        # Analyze and add results for each line
-        row_count = 0
-        for line in self.spectral_lines:
-            # Calculate line flux
-            line_result = fitter.get_line_flux(mcmc_result, line.name)
+        # # Analyze and add results for each line
+        # row_count = 0
+        # for line in self.spectral_lines:
+        #     # Calculate line flux
+        #     line_result = fitter.get_line_flux(mcmc_result, line.name)
             
-            if not line_result:
-                continue
+        #     if not line_result:
+        #         continue
             
-            # Add total flux row
-            flux_table.insertRow(row_count)
-            flux_table.setItem(row_count, 0, QTableWidgetItem(line.name))
-            flux_table.setItem(row_count, 1, QTableWidgetItem("Total"))
-            flux_table.setItem(row_count, 2, QTableWidgetItem(f"{line_result['flux']:.3e}"))
-            flux_table.setItem(row_count, 3, QTableWidgetItem(f"{line_result['error_down']:.3e}"))
-            flux_table.setItem(row_count, 4, QTableWidgetItem(f"{line_result['error_up']:.3e}"))
-            flux_table.setItem(row_count, 5, QTableWidgetItem("N/A"))
-            row_count += 1
+        #     # Add total flux row
+        #     flux_table.insertRow(row_count)
+        #     flux_table.setItem(row_count, 0, QTableWidgetItem(line.name))
+        #     flux_table.setItem(row_count, 1, QTableWidgetItem("Total"))
+        #     flux_table.setItem(row_count, 2, QTableWidgetItem(f"{line_result['flux']:.3e}"))
+        #     flux_table.setItem(row_count, 3, QTableWidgetItem(f"{line_result['error_down']:.3e}"))
+        #     flux_table.setItem(row_count, 4, QTableWidgetItem(f"{line_result['error_up']:.3e}"))
+        #     flux_table.setItem(row_count, 5, QTableWidgetItem("N/A"))
+        #     row_count += 1
             
-            # Add component rows
-            for comp, comp_result in line_result['components'].items():
-                flux_table.insertRow(row_count)
-                flux_table.setItem(row_count, 0, QTableWidgetItem(""))
-                flux_table.setItem(row_count, 1, QTableWidgetItem(comp))
-                flux_table.setItem(row_count, 2, QTableWidgetItem(f"{comp_result['flux']:.3e}"))
-                flux_table.setItem(row_count, 3, QTableWidgetItem(f"{comp_result['error_down']:.3e}"))
-                flux_table.setItem(row_count, 4, QTableWidgetItem(f"{comp_result['error_up']:.3e}"))
-                flux_table.setItem(row_count, 5, QTableWidgetItem("N/A"))
-                row_count += 1
+        #     # Add component rows
+        #     for comp, comp_result in line_result['components'].items():
+        #         flux_table.insertRow(row_count)
+        #         flux_table.setItem(row_count, 0, QTableWidgetItem(""))
+        #         flux_table.setItem(row_count, 1, QTableWidgetItem(comp))
+        #         flux_table.setItem(row_count, 2, QTableWidgetItem(f"{comp_result['flux']:.3e}"))
+        #         flux_table.setItem(row_count, 3, QTableWidgetItem(f"{comp_result['error_down']:.3e}"))
+        #         flux_table.setItem(row_count, 4, QTableWidgetItem(f"{comp_result['error_up']:.3e}"))
+        #         flux_table.setItem(row_count, 5, QTableWidgetItem("N/A"))
+        #         row_count += 1
         
-        # Adjust table layout
-        flux_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        flux_table.horizontalHeader().setStretchLastSection(True)
+        # # Adjust table layout
+        # flux_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # flux_table.horizontalHeader().setStretchLastSection(True)
         
-        flux_layout.addWidget(flux_table)
+        # flux_layout.addWidget(flux_table)
         
-        # Add export button
-        export_btn_layout = QHBoxLayout()
-        export_flux_btn = QPushButton("Export Flux Results")
-        export_btn_layout.addWidget(export_flux_btn)
-        flux_layout.addLayout(export_btn_layout)
+        # # Add export button
+        # export_btn_layout = QHBoxLayout()
+        # export_flux_btn = QPushButton("Export Flux Results")
+        # export_btn_layout.addWidget(export_flux_btn)
+        # flux_layout.addLayout(export_btn_layout)
         
-        # Component parameters tab
-        params_tab = QWidget()
-        params_layout = QVBoxLayout(params_tab)
+        # # Component parameters tab
+        # params_tab = QWidget()
+        # params_layout = QVBoxLayout(params_tab)
         
-        # Create table for parameter results
-        params_table = QTableWidget()
-        params_table.setColumnCount(4)
-        params_table.setHorizontalHeaderLabels([
-            "Component", "Parameter", "Value", "Error"
-        ])
+        # # Create table for parameter results
+        # params_table = QTableWidget()
+        # params_table.setColumnCount(4)
+        # params_table.setHorizontalHeaderLabels([
+        #     "Component", "Parameter", "Value", "Error"
+        # ])
         
-        # Get unique components
-        all_components = set()
-        for line in self.spectral_lines:
-            all_components.update(line.components)
+        # # Get unique components
+        # all_components = set()
+        # for line in self.spectral_lines:
+        #     all_components.update(line.components)
         
-        # Add rows for each component parameter
-        row_count = 0
-        for comp in sorted(all_components):
-            # Get redshift
-            z_key = f"z_{comp}"
-            if z_key in mcmc_result.var_names:
-                z_percentiles = np.percentile(mcmc_result.flatchain[z_key], [16, 50, 84])
-                z_value = z_percentiles[1]
-                z_error = (z_percentiles[2] - z_percentiles[0]) / 2
+        # # Add rows for each component parameter
+        # row_count = 0
+        # for comp in sorted(all_components):
+        #     # Get redshift
+        #     z_key = f"z_{comp}"
+        #     if z_key in mcmc_result.var_names:
+        #         z_percentiles = np.percentile(mcmc_result.flatchain[z_key], [16, 50, 84])
+        #         z_value = z_percentiles[1]
+        #         z_error = (z_percentiles[2] - z_percentiles[0]) / 2
                 
-                params_table.insertRow(row_count)
-                params_table.setItem(row_count, 0, QTableWidgetItem(comp))
-                params_table.setItem(row_count, 1, QTableWidgetItem("Redshift"))
-                params_table.setItem(row_count, 2, QTableWidgetItem(f"{z_value:.5f}"))
-                params_table.setItem(row_count, 3, QTableWidgetItem(f"±{z_error:.5f}"))
-                row_count += 1
+        #         params_table.insertRow(row_count)
+        #         params_table.setItem(row_count, 0, QTableWidgetItem(comp))
+        #         params_table.setItem(row_count, 1, QTableWidgetItem("Redshift"))
+        #         params_table.setItem(row_count, 2, QTableWidgetItem(f"{z_value:.5f}"))
+        #         params_table.setItem(row_count, 3, QTableWidgetItem(f"±{z_error:.5f}"))
+        #         row_count += 1
             
-            # Get sigma
-            sigma_key = f"sigma_{comp}"
-            if sigma_key in mcmc_result.var_names:
-                sigma_percentiles = np.percentile(mcmc_result.flatchain[sigma_key], [16, 50, 84])
-                sigma_value = sigma_percentiles[1]
-                sigma_error = (sigma_percentiles[2] - sigma_percentiles[0]) / 2
+        #     # Get sigma
+        #     sigma_key = f"sigma_{comp}"
+        #     if sigma_key in mcmc_result.var_names:
+        #         sigma_percentiles = np.percentile(mcmc_result.flatchain[sigma_key], [16, 50, 84])
+        #         sigma_value = sigma_percentiles[1]
+        #         sigma_error = (sigma_percentiles[2] - sigma_percentiles[0]) / 2
                 
-                params_table.insertRow(row_count)
-                params_table.setItem(row_count, 0, QTableWidgetItem(comp))
-                params_table.setItem(row_count, 1, QTableWidgetItem("Sigma (km/s)"))
-                params_table.setItem(row_count, 2, QTableWidgetItem(f"{sigma_value:.1f}"))
-                params_table.setItem(row_count, 3, QTableWidgetItem(f"±{sigma_error:.1f}"))
-                row_count += 1
+        #         params_table.insertRow(row_count)
+        #         params_table.setItem(row_count, 0, QTableWidgetItem(comp))
+        #         params_table.setItem(row_count, 1, QTableWidgetItem("Sigma (km/s)"))
+        #         params_table.setItem(row_count, 2, QTableWidgetItem(f"{sigma_value:.1f}"))
+        #         params_table.setItem(row_count, 3, QTableWidgetItem(f"±{sigma_error:.1f}"))
+        #         row_count += 1
         
-        # Adjust table layout
-        params_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        params_table.horizontalHeader().setStretchLastSection(True)
+        # # Adjust table layout
+        # params_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # params_table.horizontalHeader().setStretchLastSection(True)
         
-        params_layout.addWidget(params_table)
+        # params_layout.addWidget(params_table)
         
-        # Export parameters button
-        export_params_btn = QPushButton("Export Parameter Results")
-        params_layout.addWidget(export_params_btn)
+        # # Export parameters button
+        # export_params_btn = QPushButton("Export Parameter Results")
+        # params_layout.addWidget(export_params_btn)
         
-        # Add tabs to tab widget
-        tabs.addTab(flux_tab, "Flux Results")
-        tabs.addTab(params_tab, "Component Parameters")
+        # # Add tabs to tab widget
+        # tabs.addTab(flux_tab, "Flux Results")
+        # tabs.addTab(params_tab, "Component Parameters")
         
-        # Add tab widget to dialog
-        layout.addWidget(tabs)
+        # # Add tab widget to dialog
+        # layout.addWidget(tabs)
         
-        # Add close button
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(dialog.accept)
-        layout.addWidget(close_btn)
+        # # Add close button
+        # close_btn = QPushButton("Close")
+        # close_btn.clicked.connect(dialog.accept)
+        # layout.addWidget(close_btn)
         
-        # Define export functions
-        def export_flux_results():
-            file_path, _ = QFileDialog.getSaveFileName(
-                dialog, "Save Flux Results", "", "CSV Files (*.csv);;All Files (*)"
-            )
+        # # Define export functions
+        # def export_flux_results():
+        #     file_path, _ = QFileDialog.getSaveFileName(
+        #         dialog, "Save Flux Results", "", "CSV Files (*.csv);;All Files (*)"
+        #     )
             
-            if file_path:
-                import csv
-                with open(file_path, 'w', newline='') as f:
-                    writer = csv.writer(f)
-                    writer.writerow(["Line", "Component", "Flux", "Error (Low)", "Error (High)"])
+        #     if file_path:
+        #         import csv
+        #         with open(file_path, 'w', newline='') as f:
+        #             writer = csv.writer(f)
+        #             writer.writerow(["Line", "Component", "Flux", "Error (Low)", "Error (High)"])
                     
-                    for row in range(flux_table.rowCount()):
-                        line_name = flux_table.item(row, 0).text()
-                        component = flux_table.item(row, 1).text()
-                        flux_val = flux_table.item(row, 2).text()
-                        error_low = flux_table.item(row, 3).text()
-                        error_high = flux_table.item(row, 4).text()
+        #             for row in range(flux_table.rowCount()):
+        #                 line_name = flux_table.item(row, 0).text()
+        #                 component = flux_table.item(row, 1).text()
+        #                 flux_val = flux_table.item(row, 2).text()
+        #                 error_low = flux_table.item(row, 3).text()
+        #                 error_high = flux_table.item(row, 4).text()
                         
-                        writer.writerow([line_name, component, flux_val, error_low, error_high])
+        #                 writer.writerow([line_name, component, flux_val, error_low, error_high])
                 
-                self.statusBar().showMessage(f"Flux results exported to {file_path}")
+        #         self.statusBar().showMessage(f"Flux results exported to {file_path}")
         
-        def export_parameter_results():
-            file_path, _ = QFileDialog.getSaveFileName(
-                dialog, "Save Parameter Results", "", "CSV Files (*.csv);;All Files (*)"
-            )
+        # def export_parameter_results():
+        #     file_path, _ = QFileDialog.getSaveFileName(
+        #         dialog, "Save Parameter Results", "", "CSV Files (*.csv);;All Files (*)"
+        #     )
             
-            if file_path:
-                import csv
-                with open(file_path, 'w', newline='') as f:
-                    writer = csv.writer(f)
-                    writer.writerow(["Component", "Parameter", "Value", "Error"])
+        #     if file_path:
+        #         import csv
+        #         with open(file_path, 'w', newline='') as f:
+        #             writer = csv.writer(f)
+        #             writer.writerow(["Component", "Parameter", "Value", "Error"])
                     
-                    for row in range(params_table.rowCount()):
-                        component = params_table.item(row, 0).text()
-                        parameter = params_table.item(row, 1).text()
-                        value = params_table.item(row, 2).text()
-                        error = params_table.item(row, 3).text()
+        #             for row in range(params_table.rowCount()):
+        #                 component = params_table.item(row, 0).text()
+        #                 parameter = params_table.item(row, 1).text()
+        #                 value = params_table.item(row, 2).text()
+        #                 error = params_table.item(row, 3).text()
                         
-                        writer.writerow([component, parameter, value, error])
+        #                 writer.writerow([component, parameter, value, error])
 
     def update_flux_results_in_table(self, mcmc_result):
         """Update the main table with flux results from the fit"""

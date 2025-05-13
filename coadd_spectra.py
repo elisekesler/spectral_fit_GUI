@@ -83,6 +83,8 @@ class CoadderThread(QThread):
         print('err up')
         spec_formatted['error_upper'] = np.array(spec['ERROR'][0])
         spec_formatted['error_lower'] = np.array(spec['ERROR_LOWER'][0])
+        print(f'Number of non-zero error lower: {len(spec_formatted['error_lower'][spec_formatted['error_lower'] != 0])}')
+        print(f'Number of non-zero error upper: {len(spec_formatted['error_upper'][spec_formatted['error_upper'] != 0])}')
         print('err low')
         spec_formatted['G230L_error_up'] = np.zeros_like(spec_formatted['error_lower'])
         spec_formatted['G230L_error_down'] = np.zeros_like(spec_formatted['error_lower'])
@@ -174,6 +176,7 @@ class CoadderThread(QThread):
             # Coadd the spectra
             coadded_spectrum = coadd(combined_table, self.delta)
             
+            print(f'after coadding, my spectrum has {len(coadded_spectrum['error_up'][coadded_spectrum['error_up'] != 0])} non-zero upper errors')
             # Update progress (100% after coadding)
             self.progress_updated.emit(100)
             
