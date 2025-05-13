@@ -26,6 +26,91 @@ class CoadderThread(QThread):
         self.file_data = file_data
         self.delta = delta
         
+    def prepare(self, file):
+        """Nicely formats file into columns. Also does bitmasking"""
+        print(f'preparing {file}')
+        spec = Table.read(file)
+        print(f'file read')
+        spec_formatted = Table()
+        try:
+            if spec['DQ'][0] == 55:
+                print(f'this is a test spectrum')
+                # this is the flag for a test spectrum. maybe not the best way to do it, but it works
+                spec['DQ'][0] = 0
+                spec_formatted['wave'] = np.array(spec['WAVELENGTH'])
+                spec_formatted['flux'] = np.array(spec['FLUX'])
+                spec_formatted['flag'] = np.array(spec['DQ'])
+                spec_formatted['exp_time'] = np.array(spec['EXPTIME'])
+
+                spec_formatted['error_upper'] = np.array(spec['ERROR'])
+                spec_formatted['error_lower'] = np.array(spec['ERROR_LOWER'])
+                spec_formatted['G230L_error_up'] = np.zeros_like(spec_formatted['error_lower'])
+                spec_formatted['G230L_error_down'] = np.zeros_like(spec_formatted['error_lower'])
+                spec_formatted['gcounts'] = np.array(spec['GCOUNTS'])
+                spec_formatted['background'] = np.array(spec['BACKGROUND'])
+                spec_formatted['net'] = np.array(spec['NET'])
+                net_exp_array = np.array(spec['NET'])*spec_formatted['exp_time'] 
+                bkg_exp_array = np.array(spec['BACKGROUND'])*spec_formatted['exp_time']
+                variance_flat = np.array(spec['VARIANCE_FLAT'])
+                spec_formatted['bkg_times_exp'] = np.nan_to_num(bkg_exp_array)
+                spec_formatted['net_times_exp_time'] = np.nan_to_num(net_exp_array)
+                
+                flags = spec_formatted['flag']
+                mask = np.where((flags == 0) | (flags == 4))
+                masked_spec = spec_formatted[(mask)]
+
+                return masked_spec
+
+        except Exception as e:
+            print(f'not a test')
+
+        print(f'wave')
+        spec_formatted['wave'] = np.array(spec['WAVELENGTH'][0])
+        print(f'flux')
+        spec_formatted['flux'] = np.array(spec['FLUX'][0])
+        print('flag')
+        spec_formatted['flag'] = np.array(spec['DQ'][0])
+        
+
+        if (spec['EXPTIME'].shape != (1,)):
+            print(f'exptime loop 1')
+            spec_formatted['exp_time'] = np.array(np.max(spec['EXPTIME']))
+            
+        else: 
+            print(f'exptime loop 2')
+            spec_formatted['exp_time'] = np.array(spec['EXPTIME'])
+        
+        print('err up')
+        spec_formatted['error_upper'] = np.array(spec['ERROR'][0])
+        spec_formatted['error_lower'] = np.array(spec['ERROR_LOWER'][0])
+        print('err low')
+        spec_formatted['G230L_error_up'] = np.zeros_like(spec_formatted['error_lower'])
+        spec_formatted['G230L_error_down'] = np.zeros_like(spec_formatted['error_lower'])
+        print('gcounts')
+        spec_formatted['gcounts'] = np.array(spec['GCOUNTS'][0])
+        print('background')
+        spec_formatted['background'] = np.array(spec['BACKGROUND'][0])
+        print('net')
+        spec_formatted['net'] = np.array(spec['NET'][0])
+        print('net_exp_array')
+        net_exp_array = np.array(spec['NET'][0])*spec_formatted['exp_time'][0] 
+        print('bkg_exp_array')
+        bkg_exp_array = np.array(spec['BACKGROUND'][0])*spec_formatted['exp_time'][0] 
+        print('variance flat')
+        variance_flat = np.array(spec['VARIANCE_FLAT'][0])
+
+        print('bkg times exp')
+        spec_formatted['bkg_times_exp'] = np.nan_to_num(bkg_exp_array)
+        print('net times exp')
+        spec_formatted['net_times_exp_time'] = np.nan_to_num(net_exp_array)
+        
+        flags = spec_formatted['flag']
+        mask = np.where((flags == 0) | (flags == 4))
+        print(f'mask shape {mask}')
+        masked_spec = spec_formatted[(mask)]
+        print(f'made it through prep')
+        
+        return masked_spec 
     def run(self):
         try:
             # Process FITS files
@@ -34,15 +119,18 @@ class CoadderThread(QThread):
             
             total_files = len(self.file_data)
             for i, (file_path, grating) in enumerate(self.file_data):
+                print(f'have {i} of {total_files} files, grating {grating}')
                 try:
                     if grating == 'G140L':
-                        table = prepare(file_path)
+                        print(f'made it to grating ')
+                        table = self.prepare(file_path)
                     else:
                         table = prepare_other_grating(file_path, grating=grating)
                     
+                    print(f'now appending')
                     processed_data.append(table)
                     grating_types.append(grating)
-                    
+                    print('appended successfully')
                     # Update progress (50% for loading and processing)
                     self.progress_updated.emit(int(50 * (i + 1) / total_files))
                 except Exception as e:

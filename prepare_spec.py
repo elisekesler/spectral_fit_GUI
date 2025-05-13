@@ -26,6 +26,7 @@ def prepare(file):
     spec_formatted = Table()
 
     if spec['DQ'][0] == 55:
+        print(f'this is a test spectrum')
         # this is the flag for a test spectrum. maybe not the best way to do it, but it works
         spec['DQ'][0] = 0
         spec_formatted['wave'] = np.array(spec['WAVELENGTH'])
@@ -51,33 +52,51 @@ def prepare(file):
         masked_spec = spec_formatted[(mask)]
     else:
 
+        print(f'wave')
         spec_formatted['wave'] = np.array(spec['WAVELENGTH'][0])
+        print(f'flux')
         spec_formatted['flux'] = np.array(spec['FLUX'][0])
+        print('flag')
         spec_formatted['flag'] = np.array(spec['DQ'][0])
         
+
         if (spec['EXPTIME'].shape != (1,)):
+            print(f'exptime loop 1')
             spec_formatted['exp_time'] = np.array(np.max(spec['EXPTIME']))
             
         else: 
+            print(f'exptime loop 2')
             spec_formatted['exp_time'] = np.array(spec['EXPTIME'])
         
+        print('err up')
         spec_formatted['error_upper'] = np.array(spec['ERROR'][0])
         spec_formatted['error_lower'] = np.array(spec['ERROR_LOWER'][0])
+        print('err low')
         spec_formatted['G230L_error_up'] = np.zeros_like(spec_formatted['error_lower'])
         spec_formatted['G230L_error_down'] = np.zeros_like(spec_formatted['error_lower'])
+        print('gcounts')
         spec_formatted['gcounts'] = np.array(spec['GCOUNTS'][0])
+        print('background')
         spec_formatted['background'] = np.array(spec['BACKGROUND'][0])
+        print('net')
         spec_formatted['net'] = np.array(spec['NET'][0])
+        print('net_exp_array')
         net_exp_array = np.array(spec['NET'][0])*spec_formatted['exp_time'][0] 
+        print('bkg_exp_array')
         bkg_exp_array = np.array(spec['BACKGROUND'][0])*spec_formatted['exp_time'][0] 
+        print('variance flat')
         variance_flat = np.array(spec['VARIANCE_FLAT'][0])
 
+        print('bkg times exp')
         spec_formatted['bkg_times_exp'] = np.nan_to_num(bkg_exp_array)
+        print('net times exp')
         spec_formatted['net_times_exp_time'] = np.nan_to_num(net_exp_array)
         
         flags = spec_formatted['flag']
         mask = np.where((flags == 0) | (flags == 4))
+        print(f'mask shape {mask}')
         masked_spec = spec_formatted[(mask)]
+        print(f'made it through prep')
     
     return masked_spec 
 
@@ -172,7 +191,7 @@ def combine_tables(table1, table2, low1, high1, low2, high2, low3, high3):
     final_table = vstack([new_table1, new_table2])
     
 
-    
+    print('made it through combine tables')
     return final_table
 
 def coadd(combined_table, delta, subtract_background=False):
@@ -219,6 +238,7 @@ def coadd(combined_table, delta, subtract_background=False):
     coadded_spectrum['background_times_exp'] = 0.0
     coadded_spectrum['wavediff_ratio'] = 0.0
 
+    print(f'now trying to coadd')
     #coadd with desired lambda
     for pixel in coadded_spectrum:
         thispixel = combined_table[(combined_table['wave'] >= (pixel['wave'] - delta/2)) & (combined_table['wave'] < (pixel['wave'] + delta/2))]

@@ -147,6 +147,10 @@ class SpectralLine:
     components: List[str]
     doublet: Optional[DoubletInfo] = None
     geocoronal: bool = False
+    include_in_fit: bool = True  # Flag to include this line in the fit
+    def set_include_in_fit(self, include: bool):
+        """Set whether to include this line in the fit"""
+        self.include_in_fit = include
     
 @dataclass
 class FluxResult:
@@ -249,6 +253,8 @@ class SpectralFitter:
             
             # Add each line component
             for line in lines:
+                if not line.include_in_fit:
+                    continue
                 for comp in line.components:
                     z_param = f"z_{comp}"
                     sigma_param = f"sigma_{comp}"

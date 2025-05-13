@@ -9,15 +9,18 @@ import lmfit
 import os
 import math
 import matplotlib.pyplot as plt
+import logging
+import logging.handlers as handlers
+
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget,
+    QApplication, QMainWindow, QPushButton, QWidget,
     QFileDialog, QLabel, QHBoxLayout, QProgressBar,
     QInputDialog, QMessageBox, QComboBox, QTableWidget,
     QTableWidgetItem, QSizePolicy, QFrame, QScrollArea,
     QDialog, QFormLayout, QDialogButtonBox,
     QLineEdit, QCheckBox, QDoubleSpinBox,
     QVBoxLayout, QRadioButton, QButtonGroup, QGroupBox,
-    QTabWidget,  QListWidget, QListWidgetItem,
+    QTabWidget,  QListWidget, QListWidgetItem, QHeaderView,
 )
 from gaussian_fitfunctions import SpectralLine, DoubletInfo
 import csv
@@ -56,6 +59,7 @@ class SpectralFluxApp(QMainWindow):
         self.grating_data = []
         self.coadded_spectrum = None
         self.fits_file_paths = []
+        self.all_plotted_models = []
         self.redshift = 0.0
         self.selection_step = 0
         self.cid = None  # Connection ID for event handler
@@ -73,6 +77,7 @@ class SpectralFluxApp(QMainWindow):
         ]
 
         # Variables for plotting selection overlays
+        self.drawn_spectral_lines = []
         self.left_continuum_lines = []
         self.left_continuum_patch = None
         self.right_continuum_lines = []
@@ -273,9 +278,12 @@ class SpectralFluxApp(QMainWindow):
             self.save_component_parameters()
         
         # Clear existing spectral lines and parameters
+        #note: this does not work
         self.spectral_lines = []
         self.component_parameters = {}
         self.clear_line_entries()
+        # try now?
+        self.clear_all_lines()
         
         # Then load the ones for the newly selected object
         self.load_spectral_lines()
@@ -1114,6 +1122,16 @@ class SpectralFluxApp(QMainWindow):
     def save_spectral_lines(self):
         """Save the spectral lines to a CSV file specific to the current object"""
         print(f'SAVING SPECTRAL LINES: {self.spectral_lines}')
+        
+        unique_lines = []
+        seen_names = set()
+        for line in self.spectral_lines:
+            if line.name not in seen_names:
+                unique_lines.append(line)
+                seen_names.add(line.name)
+        self.spectral_lines = unique_lines
+        print(f'SAVING SPECTRAL LINES: {self.spectral_lines}')
+
         os.makedirs("internal", exist_ok=True)
         
         # Get the current object name
@@ -1210,10 +1228,6 @@ class SpectralFluxApp(QMainWindow):
             # No saved lines yet for this object
             return
         
-        # Clear existing lines
-        self.spectral_lines = []
-        self.clear_line_entries()
-        
         # Load from CSV
         try:
             with open(csv_path, 'r') as f:
@@ -1295,6 +1309,8 @@ class SpectralFluxApp(QMainWindow):
             for row in reader:
                 if len(row) >= 8:  # Check we have at least 8 columns (more if z_vary is included)
                     key = row[0]
+                    print(f'HERE IS ROW REDSHIFT: {row[1]}, HERE IS FLOAT {float(row[1])}')
+                    print(f'AND THIS IS OBJECT REDSHIFT {self.redshift}')
                     self.component_parameters[key] = {
                         'z_value': float(row[1]),
                         'z_min': float(row[2]),
@@ -1304,6 +1320,7 @@ class SpectralFluxApp(QMainWindow):
                         'sigma_max': float(row[6]),
                         'flux_value': float(row[7])
                     }
+                    #print(f'PARAMETER SAVED: {self.component_parameters['z_value']}')
                     # Add z_vary if available (in newer files)
                     if len(row) >= 9:
                         self.component_parameters[key]['z_vary'] = row[8].lower() == 'true'
@@ -1393,49 +1410,49 @@ class SpectralFluxApp(QMainWindow):
         
         # Initial redshift from main GUI
         redshift_input = QDoubleSpinBox()
-        redshift_input.setRange(0, 10)
+        # redshift_input.setRange(0, 10)
+        redshift_input.setDecimals(7)
         redshift_input.setValue(self.redshift)
-        redshift_input.setDecimals(5)
+        
         comp_params_layout.addRow("Initial Redshift:", redshift_input)
         
         # Redshift constraints
         redshift_min = QDoubleSpinBox()
-        redshift_min.setRange(0, 10)
+        # redshift_min.setRange(0, 10)
+        redshift_min.setDecimals(7)
         redshift_min.setValue(max(0, self.redshift - 0.05))
-        redshift_min.setDecimals(5)
         comp_params_layout.addRow("Min Redshift:", redshift_min)
         
         redshift_max = QDoubleSpinBox()
-        redshift_max.setRange(0, 10)
+        redshift_max.setDecimals(7)
         redshift_max.setValue(self.redshift + 0.05)
-        redshift_max.setDecimals(5)
         comp_params_layout.addRow("Max Redshift:", redshift_max)
         
         # Sigma (velocity dispersion)
         sigma_input = QDoubleSpinBox()
-        sigma_input.setRange(10, 1000)
-        sigma_input.setValue(200)  # Default
-        sigma_input.setDecimals(1)
+        sigma_input.setRange(0, 10000)
+        sigma_input.setDecimals(10)
+        sigma_input.setValue(300) 
         comp_params_layout.addRow("Initial Sigma (km/s):", sigma_input)
         
         # Sigma constraints
         sigma_min = QDoubleSpinBox()
-        sigma_min.setRange(0, 1000)
+        sigma_min.setRange(0, 10000)
+        sigma_min.setDecimals(10)
         sigma_min.setValue(10)
-        sigma_min.setDecimals(1)
         comp_params_layout.addRow("Min Sigma:", sigma_min)
         
         sigma_max = QDoubleSpinBox()
-        sigma_max.setRange(0, 5000)
+        sigma_max.setRange(0, 10000)
+        sigma_max.setDecimals(8)
         sigma_max.setValue(1000)
-        sigma_max.setDecimals(1)
         comp_params_layout.addRow("Max Sigma:", sigma_max)
         
         # Initial flux guess
         flux_input = QDoubleSpinBox()
-        flux_input.setRange(1, 1e6)
-        flux_input.setValue(100)
-        flux_input.setDecimals(1)
+        flux_input.setRange(0, 1e15)
+        flux_input.setDecimals(10)
+        flux_input.setValue(10)
         comp_params_layout.addRow("Initial Flux:", flux_input)
         
         # Add to layout
@@ -1586,11 +1603,6 @@ class SpectralFluxApp(QMainWindow):
         if not hasattr(self, 'fit_results'):
             self.statusBar().showMessage("No fit results available.")
             return
-        
-        from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QTabWidget, 
-                                QWidget, QTableWidget, QTableWidgetItem,
-                                QHeaderView, QPushButton, QHBoxLayout,
-                                QFileDialog)
         
         # Get the fit results
         fitter = self.fit_results['fitter']
@@ -1844,6 +1856,11 @@ class SpectralFluxApp(QMainWindow):
         if not hasattr(self, 'fit_results'):
             return
         
+        # clear other plots
+        self.clear_fit_result_plot()
+
+        legend_labels = []
+        legend_handles = []
         # Get the fit results
         fitter = self.fit_results['fitter']
         mcmc_result = self.fit_results['mcmc_result']
@@ -1875,17 +1892,25 @@ class SpectralFluxApp(QMainWindow):
         # Process each region
         for region_key, region_data in models_data.items():
             region_wave = region_data['wave']
-            
             # Plot total model
-            self.ax.plot(region_wave, region_data['total_model'], 'r-', 
+            total_model = self.ax.plot(region_wave, region_data['total_model'], 'r-', 
                     label='Model Fit', lw=2)
-            
+            self.all_plotted_models.append(total_model)
+            legend_labels.append("Total Model")
+            legend_handles.append(total_model[0])
             # Plot individual components
+            
             colors = plt.cm.tab10(np.linspace(0, 1, len(region_data['components'])))
             for (comp_name, comp_data), color in zip(region_data['components'].items(), colors):
-                self.ax.plot(region_wave, comp_data['model'] + region_data['continuum'],
-                        '--', color=color, label=comp_name, alpha=0.7)
-        
+                plotted = self.ax.plot(region_wave, comp_data['model'] + region_data['continuum'],
+                        '--', color=color, alpha=0.7)
+                self.all_plotted_models.append(plotted)
+                legend_labels.append(f"{comp_name}")
+                legend_handles.append(plotted[0])
+            continuum_model = self.ax.plot(region_wave, region_data['continuum'], 'k--', color='gray', alpha = 0.7)
+            self.all_plotted_models.append(continuum_model)
+            legend_labels.append("Continuum")
+            legend_handles.append(continuum_model[0])
         # Set appropriate axis limits
         # Get the region limits from the first (and likely only) region
         first_region = list(models_data.values())[0]
@@ -1909,10 +1934,18 @@ class SpectralFluxApp(QMainWindow):
         
         # Update legend - get existing handles and labels, then add new ones
         handles, labels = self.ax.get_legend_handles_labels()
-        self.ax.legend(loc='best')
+        self.ax.legend(labels = legend_labels, handles = legend_handles, loc='best')
         
         # Redraw the canvas
         self.canvas.draw()
+
+    def clear_fit_result_plot(self):
+        for line in self.ax.lines:
+            if line in self.all_plotted_models:
+                print(f"Removing line: {line}")
+                line.remove()
+        self.all_plotted_models = []
+            
     def fit_gaussian_model(self):
         """Perform fitting using the JointSpectralFitter class"""
         print("\n=== Starting Gaussian Fitting Process ===")
@@ -2241,7 +2274,13 @@ class SpectralFluxApp(QMainWindow):
     def create_line_entry_from_spectral_line(self, spectral_line):
         """Create a UI entry from an existing SpectralLine object"""
         
-        # Store the spectral line
+        # Check if the spectral line already exists
+        for existing_line in self.spectral_lines:
+            if existing_line.name == spectral_line.name:
+                print(f'spectral line already exists, got caught here')
+                # return
+            
+        # But... if the line does not exist yet, add it
         self.spectral_lines.append(spectral_line)
         
         # Skip creating UI elements if we're not in Gaussian Fit mode
@@ -2277,6 +2316,12 @@ class SpectralFluxApp(QMainWindow):
         view_params_button = QPushButton("Parameters")
         view_params_button.clicked.connect(lambda: self.view_line_parameters(spectral_line))
         entry_layout.addWidget(view_params_button)
+
+        include_line_button = QCheckBox("Include in Fit?")
+        include_line_button.setChecked(True)
+        include_line_button.stateChanged.connect(lambda state: spectral_line.set_include_in_fit(state))
+        entry_layout.addWidget(include_line_button)
+        
         
         # Remove the stretch from the end of line_entries_layout
         if self.line_entries_layout.count() > 0:
@@ -2849,6 +2894,15 @@ class SpectralFluxApp(QMainWindow):
         else:
             self.statusBar().showMessage('No co-added spectrum to plot')
 
+    def clear_all_lines(self):
+        try:
+            if len(self.ax.lines) > 0:
+                for line in self.ax.lines:
+                    line.remove()
+        except Exception:
+            print(f'no axis defined yet/no lines to remove')
+            
+            
     def plot_expected_lines(self, ax=None):
         try:
             redshift = float(self.redshift_input.text()) if self.redshift_input.text() else self.redshift
@@ -2859,7 +2913,8 @@ class SpectralFluxApp(QMainWindow):
                 ax = self.figure.gca()
 
             for i, line in enumerate(observed_lines[1:]):  # Skip 'Full Spectrum' placeholder
-                ax.axvline(x=line, linestyle='--', color=colors[i % len(colors)])
+                thisline = ax.axvline(x=line, linestyle='--', color=colors[i % len(colors)])
+                self.drawn_spectral_lines.append(thisline)
                 ax.text(line, ax.get_ylim()[1] * 0.5, self.line_labels[i+1],
                         color=colors[i % len(colors)], rotation=90, verticalalignment='bottom')
         except ValueError:
@@ -3009,13 +3064,16 @@ class SpectralFluxApp(QMainWindow):
 
     def plot_integration_region(self):
         # Remove previous lines and patches if they exist
-        for line in self.integration_lines:
-            line.remove()
+        # for line in self.integration_lines:
+        #     line.remove()
         self.integration_lines = []
 
         if self.integration_patch:
-            self.integration_patch.remove()
-            self.integration_patch = None
+            try:
+                self.integration_patch.remove()
+                self.integration_patch = None
+            except Exception as e:
+                print(f'weird integration patch error')
 
         # Plot vertical lines
         line1 = self.ax.axvline(x=self.integration_start, color='red',alpha=0.5)
