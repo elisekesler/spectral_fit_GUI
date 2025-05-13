@@ -130,6 +130,7 @@ class DoubletInfo:
     """Class to hold information about a spectral line doublet"""
     secondary_wavelength: float  # Rest wavelength of the secondary line
     ratio: float  # Ratio of secondary to primary line flux (e.g., 1/2.95 for [O III])
+    ratio_varies: bool = False  # Flag to vary the ratio during fitting
 
 @dataclass
 class FitComponent:
@@ -259,9 +260,8 @@ class SpectralFitter:
                     z_param = f"z_{comp}"
                     sigma_param = f"sigma_{comp}"
                     flux_param = f"flux_{line.name}_{comp}"
-                    
-                    if ratio:
-                        try:
+                    if line.doublet is not None:
+                        if line.doublet.ratio_varies:
                             ratio_param = f"ratio_{line.name}"
                             total += self._gaussian(
                                 wave, 
@@ -273,8 +273,6 @@ class SpectralFitter:
                                 geocoronal=line.geocoronal,
                                 ratio = kwargs[ratio_param]
                             )
-                        except Exception:
-                            pass
                     else:
                         total += self._gaussian(
                             wave, 

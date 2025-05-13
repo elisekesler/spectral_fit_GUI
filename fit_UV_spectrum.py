@@ -34,60 +34,61 @@ class GaussianWindow(QWidget):
     def __init__(self, fitter, mcmc_result, spectral_lines):
         super().__init__()
         print(f'GaussianWindow init')
-        # layout = QVBoxLayout()
-        label = QLabel("Gaussian Fit Results")
+        self.setWindowTitle("Gaussian Fit Results")
+        self.setGeometry(100, 100, 600, 400)
+        layout = QVBoxLayout(self)
         # layout.addWidget(self.label)
         # self.setLayout(layout)
         
         # # Create tabs
-        # tabs = QTabWidget()
+        tabs = QTabWidget()
         
         # # Flux results tab
-        # flux_tab = QWidget()
-        # flux_layout = QVBoxLayout(flux_tab)
+        flux_tab = QWidget()
+        flux_layout = QVBoxLayout(flux_tab)
         
         # # Create table for flux results
-        # flux_table = QTableWidget()
-        # flux_table.setColumnCount(6)
-        # flux_table.setHorizontalHeaderLabels([
-        #     "Line", "Component", "Flux", "Error (Low)", "Error (High)", "EW (Å)"
-        # ])
+        flux_table = QTableWidget()
+        flux_table.setColumnCount(6)
+        flux_table.setHorizontalHeaderLabels([
+            "Line", "Component", "Flux", "Error (Low)", "Error (High)", "EW (Å)"
+        ])
         
         # # Analyze and add results for each line
-        # row_count = 0
-        # for line in spectral_lines:
-        #     # Calculate line flux
-        #     line_result = fitter.get_line_flux(mcmc_result, line.name)
+        row_count = 0
+        for line in spectral_lines:
+            # Calculate line flux
+            line_result = fitter.get_line_flux(mcmc_result, line.name)
             
-        #     if not line_result:
-        #         continue
+            if not line_result:
+                continue
             
-        #     # Add total flux row
-        #     flux_table.insertRow(row_count)
-        #     flux_table.setItem(row_count, 0, QTableWidgetItem(line.name))
-        #     flux_table.setItem(row_count, 1, QTableWidgetItem("Total"))
-        #     flux_table.setItem(row_count, 2, QTableWidgetItem(f"{line_result['flux']:.3e}"))
-        #     flux_table.setItem(row_count, 3, QTableWidgetItem(f"{line_result['error_down']:.3e}"))
-        #     flux_table.setItem(row_count, 4, QTableWidgetItem(f"{line_result['error_up']:.3e}"))
-        #     flux_table.setItem(row_count, 5, QTableWidgetItem("N/A"))
-        #     row_count += 1
+            # Add total flux row
+            flux_table.insertRow(row_count)
+            flux_table.setItem(row_count, 0, QTableWidgetItem(line.name))
+            flux_table.setItem(row_count, 1, QTableWidgetItem("Total"))
+            flux_table.setItem(row_count, 2, QTableWidgetItem(f"{line_result['flux']:.3e}"))
+            flux_table.setItem(row_count, 3, QTableWidgetItem(f"{line_result['error_down']:.3e}"))
+            flux_table.setItem(row_count, 4, QTableWidgetItem(f"{line_result['error_up']:.3e}"))
+            flux_table.setItem(row_count, 5, QTableWidgetItem("N/A"))
+            row_count += 1
             
         #     # Add component rows
-        #     for comp, comp_result in line_result['components'].items():
-        #         flux_table.insertRow(row_count)
-        #         flux_table.setItem(row_count, 0, QTableWidgetItem(""))
-        #         flux_table.setItem(row_count, 1, QTableWidgetItem(comp))
-        #         flux_table.setItem(row_count, 2, QTableWidgetItem(f"{comp_result['flux']:.3e}"))
-        #         flux_table.setItem(row_count, 3, QTableWidgetItem(f"{comp_result['error_down']:.3e}"))
-        #         flux_table.setItem(row_count, 4, QTableWidgetItem(f"{comp_result['error_up']:.3e}"))
-        #         flux_table.setItem(row_count, 5, QTableWidgetItem("N/A"))
-        #         row_count += 1
+            for comp, comp_result in line_result['components'].items():
+                flux_table.insertRow(row_count)
+                flux_table.setItem(row_count, 0, QTableWidgetItem(""))
+                flux_table.setItem(row_count, 1, QTableWidgetItem(comp))
+                flux_table.setItem(row_count, 2, QTableWidgetItem(f"{comp_result['flux']:.3e}"))
+                flux_table.setItem(row_count, 3, QTableWidgetItem(f"{comp_result['error_down']:.3e}"))
+                flux_table.setItem(row_count, 4, QTableWidgetItem(f"{comp_result['error_up']:.3e}"))
+                flux_table.setItem(row_count, 5, QTableWidgetItem("N/A"))
+                row_count += 1
         
         # # Adjust table layout
-        # flux_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        # flux_table.horizontalHeader().setStretchLastSection(True)
+        flux_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        flux_table.horizontalHeader().setStretchLastSection(True)
         
-        # flux_layout.addWidget(flux_table)
+        flux_layout.addWidget(flux_table)
         
         # # Add export button
         # export_btn_layout = QHBoxLayout()
@@ -96,68 +97,68 @@ class GaussianWindow(QWidget):
         # flux_layout.addLayout(export_btn_layout)
         
         # # Component parameters tab
-        # params_tab = QWidget()
-        # params_layout = QVBoxLayout(params_tab)
+        params_tab = QWidget()
+        params_layout = QVBoxLayout(params_tab)
         
-        # # Create table for parameter results
-        # params_table = QTableWidget()
-        # params_table.setColumnCount(4)
-        # params_table.setHorizontalHeaderLabels([
-        #     "Component", "Parameter", "Value", "Error"
-        # ])
+        # Create table for parameter results
+        params_table = QTableWidget()
+        params_table.setColumnCount(4)
+        params_table.setHorizontalHeaderLabels([
+            "Component", "Parameter", "Value", "Error"
+        ])
         
-        # # Get unique components
-        # all_components = set()
-        # for line in spectral_lines:
-        #     all_components.update(line.components)
+        # Get unique components
+        all_components = set()
+        for line in spectral_lines:
+            all_components.update(line.components)
         
-        # # Add rows for each component parameter
-        # row_count = 0
-        # for comp in sorted(all_components):
-        #     # Get redshift
-        #     z_key = f"z_{comp}"
-        #     if z_key in mcmc_result.var_names:
-        #         z_percentiles = np.percentile(mcmc_result.flatchain[z_key], [16, 50, 84])
-        #         z_value = z_percentiles[1]
-        #         z_error = (z_percentiles[2] - z_percentiles[0]) / 2
+        # Add rows for each component parameter
+        row_count = 0
+        for comp in sorted(all_components):
+            # Get redshift
+            z_key = f"z_{comp}"
+            if z_key in mcmc_result.var_names:
+                z_percentiles = np.percentile(mcmc_result.flatchain[z_key], [16, 50, 84])
+                z_value = z_percentiles[1]
+                z_error = (z_percentiles[2] - z_percentiles[0]) / 2
                 
-        #         params_table.insertRow(row_count)
-        #         params_table.setItem(row_count, 0, QTableWidgetItem(comp))
-        #         params_table.setItem(row_count, 1, QTableWidgetItem("Redshift"))
-        #         params_table.setItem(row_count, 2, QTableWidgetItem(f"{z_value:.5f}"))
-        #         params_table.setItem(row_count, 3, QTableWidgetItem(f"±{z_error:.5f}"))
-        #         row_count += 1
+                params_table.insertRow(row_count)
+                params_table.setItem(row_count, 0, QTableWidgetItem(comp))
+                params_table.setItem(row_count, 1, QTableWidgetItem("Redshift"))
+                params_table.setItem(row_count, 2, QTableWidgetItem(f"{z_value:.5f}"))
+                params_table.setItem(row_count, 3, QTableWidgetItem(f"±{z_error:.5f}"))
+                row_count += 1
             
-        #     # Get sigma
-        #     sigma_key = f"sigma_{comp}"
-        #     if sigma_key in mcmc_result.var_names:
-        #         sigma_percentiles = np.percentile(mcmc_result.flatchain[sigma_key], [16, 50, 84])
-        #         sigma_value = sigma_percentiles[1]
-        #         sigma_error = (sigma_percentiles[2] - sigma_percentiles[0]) / 2
+            # Get sigma
+            sigma_key = f"sigma_{comp}"
+            if sigma_key in mcmc_result.var_names:
+                sigma_percentiles = np.percentile(mcmc_result.flatchain[sigma_key], [16, 50, 84])
+                sigma_value = sigma_percentiles[1]
+                sigma_error = (sigma_percentiles[2] - sigma_percentiles[0]) / 2
                 
-        #         params_table.insertRow(row_count)
-        #         params_table.setItem(row_count, 0, QTableWidgetItem(comp))
-        #         params_table.setItem(row_count, 1, QTableWidgetItem("Sigma (km/s)"))
-        #         params_table.setItem(row_count, 2, QTableWidgetItem(f"{sigma_value:.1f}"))
-        #         params_table.setItem(row_count, 3, QTableWidgetItem(f"±{sigma_error:.1f}"))
-        #         row_count += 1
+                params_table.insertRow(row_count)
+                params_table.setItem(row_count, 0, QTableWidgetItem(comp))
+                params_table.setItem(row_count, 1, QTableWidgetItem("Sigma (km/s)"))
+                params_table.setItem(row_count, 2, QTableWidgetItem(f"{sigma_value:.1f}"))
+                params_table.setItem(row_count, 3, QTableWidgetItem(f"±{sigma_error:.1f}"))
+                row_count += 1
         
         # # Adjust table layout
-        # params_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        # params_table.horizontalHeader().setStretchLastSection(True)
+        params_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        params_table.horizontalHeader().setStretchLastSection(True)
         
-        # params_layout.addWidget(params_table)
+        params_layout.addWidget(params_table)
         
-        # # Export parameters button
-        # export_params_btn = QPushButton("Export Parameter Results")
-        # params_layout.addWidget(export_params_btn)
+        # Export parameters button
+        export_params_btn = QPushButton("Export Parameter Results")
+        params_layout.addWidget(export_params_btn)
         
-        # # Add tabs to tab widget
-        # tabs.addTab(flux_tab, "Flux Results")
-        # tabs.addTab(params_tab, "Component Parameters")
+        # Add tabs to tab widget
+        tabs.addTab(flux_tab, "Flux Results")
+        tabs.addTab(params_tab, "Component Parameters")
         
-        # # Add tab widget to dialog
-        # layout.addWidget(tabs)
+        # Add tab widget to dialog
+        layout.addWidget(tabs)
         
         # Add close button
         # close_btn = QPushButton("Close")
@@ -1606,6 +1607,13 @@ class SpectralFluxApp(QMainWindow):
         flux_input.setValue(10)
         comp_params_layout.addRow("Initial Flux:", flux_input)
         
+        if spectral_line.doublet is not None:
+            ratio_input = QDoubleSpinBox()
+            ratio_input.setRange(0.5, 3)
+            ratio_input.setDecimals(3)
+            ratio_input.setValue(2.95)
+            comp_params_layout.addRow("Flux Ratio:", ratio_input)
+
         # Add to layout
         components_layout.addWidget(comp_params_group)
         
@@ -1636,7 +1644,6 @@ class SpectralFluxApp(QMainWindow):
                 sigma_min.setValue(params.get('sigma_min', 10))
                 sigma_max.setValue(params.get('sigma_max', 1000))
                 flux_input.setValue(params.get('flux_value', 100))
-            
         
         # Connect component selection
         component_list.itemClicked.connect(lambda: on_component_selected())
@@ -1761,8 +1768,8 @@ class SpectralFluxApp(QMainWindow):
 
         print(f'In this function, now attempting to open Gaussian Window')
         
-        new_window = GaussianWindow(fitter, mcmc_result, self.spectral_lines)
-        new_window.show()
+        self.results_window  = GaussianWindow(fitter, mcmc_result, self.spectral_lines)
+        self.results_window.show()
         # Create dialog
         # dialog = QDialog(self)
         # dialog.setWindowTitle("Fit Results")
@@ -2122,6 +2129,17 @@ class SpectralFluxApp(QMainWindow):
         
         print(f"Current redshift: {self.redshift}")
         print(f"Number of spectral lines: {len(self.spectral_lines)}")
+
+        #attempt to get unique lines to avoid duplicates
+        unique_lines = []
+        seen_names = set()
+        for line in self.spectral_lines:
+            if line.name not in seen_names:
+                unique_lines.append(line)
+                seen_names.add(line.name)
+        self.spectral_lines = unique_lines
+        print(f"After checking unique, number of spectral lines: {len(self.spectral_lines)}")
+
         for i, line in enumerate(self.spectral_lines):
             print(f"Line {i+1}: {line.name} at rest wavelength {line.rest_wavelength} Å")
             print(f"  Components: {line.components}")
@@ -2507,7 +2525,8 @@ class SpectralFluxApp(QMainWindow):
                 "wavelength": 1238.82,
                 "is_doublet": True,
                 "secondary_wavelength": 1242.80,
-                "ratio": 2.95
+                "ratio": 2.95,
+                "ratio_varies": True
             },
             "SiIV": {
                 "wavelength": 1393.75,
@@ -2519,13 +2538,15 @@ class SpectralFluxApp(QMainWindow):
                 "wavelength": 1548.19,
                 "is_doublet": True,
                 "secondary_wavelength": 1550.77,
-                "ratio": 2.95
+                "ratio": 2.95,
+                "ratio_varies": True
             },
             "OVI": {
                 "wavelength": 1031.92,
                 "is_doublet": True,
                 "secondary_wavelength": 1037.61,
-                "ratio": 2.95
+                "ratio": 2.95,
+                "ratio_varies": True
             },
             "HeII": {
                 "wavelength": 1640.42,
