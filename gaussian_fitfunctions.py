@@ -130,6 +130,7 @@ class DoubletInfo:
     """Class to hold information about a spectral line doublet"""
     secondary_wavelength: float  # Rest wavelength of the secondary line
     ratio: float  # Ratio of secondary to primary line flux (e.g., 1/2.95 for [O III])
+    ratio_varies: bool = False  # Flag to vary the ratio during fitting
 
 @dataclass
 class FitComponent:
@@ -190,30 +191,39 @@ class SpectralFitter:
             doublet: Optional DoubletInfo for doublet lines
         """
         # Convert velocity dispersion to wavelength units
+        if sigma_kms <= 0:
+            sigma_kms = 1.0
         center = rest_wave * (1 + redshift)
 
 
         if geocoronal:
             center = rest_wave
         sigma_wave = rest_wave * sigma_kms / 3e5
+        sigma_wave = max(1e-10, rest_wave * sigma_kms / c_kms)
         
+        normalization = max(1e-10, sigma_wave * np.sqrt(2*np.pi))
+        peak = flux / normalization
+        exponent = -0.5 * ((wave - center) / sigma_wave)**2
+        exponent = np.clip(exponent, -700, 700)
         # Primary line
-        gaussian = (flux / (sigma_wave * np.sqrt(2*np.pi))) * \
-                np.exp(-0.5 * ((wave - center) / sigma_wave)**2)
+        gaussian = peak * np.exp(exponent)
         
         # Add secondary line for doublets
         if doublet is not None:
             rest_wave_2 = doublet.secondary_wavelength
             center_2 = rest_wave_2 * (1 + redshift)
-            sigma_wave_2 = rest_wave_2 * sigma_kms / 3e5
+            sigma_wave_2 = max(1e-10, rest_wave_2 * sigma_kms / c_kms)
             
             # Add secondary line with specified ratio
-            if ratio is not None:
-                flux_2 = flux * ratio
-            else:
-                flux_2 = flux * doublet.ratio
-            gaussian_2 = (flux_2 / (sigma_wave_2 * np.sqrt(2*np.pi))) * \
-                        np.exp(-0.5 * ((wave - center_2) / sigma_wave_2)**2)
+            flux_ratio = ratio if ratio is not None else doublet.ratio
+            flux_ratio = max(1e-6, flux_ratio)
+            flux_2 = flux * flux_ratio
+            normalization_2 = max(1e-10, sigma_wave_2 * np.sqrt(2*np.pi))
+            peak_2 = flux_2 / normalization_2
+            exponent_2 = -0.5 * ((wave - center_2) / sigma_wave_2)**2
+            exponent_2 = np.clip(exponent_2, -700, 700)
+            
+            gaussian_2 = peak_2 * np.exp(exponent_2)
             gaussian += gaussian_2
         
         return gaussian
@@ -259,9 +269,7 @@ class SpectralFitter:
                     z_param = f"z_{comp}"
                     sigma_param = f"sigma_{comp}"
                     flux_param = f"flux_{line.name}_{comp}"
-                    
-                    if ratio:
-                        try:
+                    if line.doublet and ratio:
                             ratio_param = f"ratio_{line.name}"
                             total += self._gaussian(
                                 wave, 
@@ -273,8 +281,6 @@ class SpectralFitter:
                                 geocoronal=line.geocoronal,
                                 ratio = kwargs[ratio_param]
                             )
-                        except Exception:
-                            pass
                     else:
                         total += self._gaussian(
                             wave, 
@@ -300,12 +306,13 @@ class SpectralFitter:
         # Add parameters for each line component
         for line in lines:
             try:
-                ratio_name = f"ratio_{line.name}"
-                parameter_constraints.get(ratio_name).get('value')
-                params.add(ratio_name, value=parameter_constraints.get(ratio_name, {}).get('value', 0.0),
-                        vary=parameter_constraints.get(ratio_name, {}).get('vary', True),
-                        min=parameter_constraints.get(ratio_name, {}).get('min', 0.0),
-                        max=parameter_constraints.get(ratio_name, {}).get('max', 1.0))
+                if line.doublet and ratio:
+                    ratio_name = f"ratio_{line.name}"
+                    ratio_constraints = parameter_constraints.get('value', line.doublet.ratio)
+                    params.add(ratio_name, value=ratio_constraints.get('value', line.doublet.ratio),
+                            vary=ratio_constraints.get('vary', True),
+                            min=ratio_constraints.get('min', 0.1),
+                            max=ratio_constraints.get('max', 10.0))
             except Exception:
                 pass
             for comp in line.components:
@@ -361,14 +368,45 @@ class SpectralFitter:
         """
         # Create mask for fitting region
         mask = (wave > self.wave_min) & (wave < self.wave_max)
-        mask &= np.isfinite(flux) & np.isfinite(error)
-        
+        mask &= np.isfinite(flux) & np.isfinite(error)  & (error > 0)
+        if np.sum(mask) < 5:
+            print("Warning: Not enough valid data points for fitting")
+            return None
         # Create model and parameters
+        for param_name, param in params.items():
+            if param.vary and param_name.startswith("ratio_"):
+                # Force tighter bounds for ratio parameters if they're varying
+                param.min = max(0.01, param.min)  # Ensure ratio doesn't get too close to zero
+        
         model, params = self.create_model(lines, parameter_constraints, ratio=ratio)
         
         # Perform fit
-        result = model.fit(flux[mask], wave=wave[mask], 
-                         weights=1/error[mask], params=params)
+        try:
+            result = model.fit(flux[mask], wave=wave[mask], 
+                            weights=1/error[mask], params=params, nan_policy = 'omit')
+        except Exception as e:
+            print(f"Warning: Initial fit failed with error: {str(e)}")
+            print("Trying again with Nelder-Mead method...")
+            try:
+                # Try with a more robust but slower method
+                result = model.fit(flux[mask], wave=wave[mask], 
+                                weights=1/error[mask], params=params,
+                                method='nelder', nan_policy='omit')
+            except Exception as e2:
+                print(f"Error in fitting: {str(e2)}")
+                return None
+        if any(np.isnan(list(result.best_values.values()))):
+            print("Warning: NaN values in best-fit parameters. Setting to defaults.")
+            # Replace NaN values with defaults
+            for name, value in result.best_values.items():
+                if np.isnan(value):
+                    if name.startswith("ratio_"):
+                        result.best_values[name] = 0.5  # Default ratio
+                    elif name.startswith("sigma_"):
+                        result.best_values[name] = 200.0  # Default sigma
+                    elif name.startswith("flux_"):
+                        result.best_values[name] = 100.0  # Default flux
+        
         
         return result
 
@@ -608,13 +646,28 @@ class SpectralFitter:
                     )
                     
                     if line.doublet is not None:
-                        # For doublets, add both components before plotting
-                        model_secondary = self._gaussian(
-                            wave,
-                            line.doublet.secondary_wavelength,
-                            z, sigma, flux_val * line.doublet.ratio,
-                            doublet=None
-                        )
+                        try: 
+                            ratio_key = f"ratio_{line.name}"
+                            if use_mcmc_median and ratio_key in result.flatchain:
+                                ratio = np.median(result.flatchain[ratio_key])
+                            elif ratio_key in result.best_values:
+                                ratio = result.best_values[ratio_key]
+                            else:
+                                ratio = line.doublet.ratio
+                            # For doublets, add both components before plotting
+                            model_secondary = self._gaussian(
+                                wave,
+                                line.doublet.secondary_wavelength,
+                                z, sigma, flux_val,
+                                doublet=None,
+                                ratio = ratio
+                            )
+                        except Exception:
+                            model_secondary = self._gaussian(
+                                wave,
+                                line.doublet.secondary_wavelength,
+                                z, sigma, flux_val*line.doublet.ratio,
+                                doublet=None)
                         # Plot sum of both components
                         ax.plot(wave, model_primary + model_secondary, '--', 
                             color=color_dict[f"{line.name}_{comp}"], label=f'{line.name} {comp}')
@@ -729,15 +782,28 @@ class JointSpectralFitter(SpectralFitter):
                         sigma_param = f"sigma_{comp}"
                         flux_param = f"flux_{line.name}_{comp}"
                         
-                        total[region_mask] += self._gaussian(
+                        if line.doublet and f"ratio_{line.name}" in kwargs:
+                            ratio_param = f"ratio_{line.name}"
+                            total[region_mask] += self._gaussian(
                             wave[region_mask],
                             line.rest_wavelength,
                             kwargs[z_param],
                             kwargs[sigma_param],
                             kwargs[flux_param],
                             doublet=line.doublet,
-                            geocoronal=line.geocoronal
-                        )
+                            geocoronal=line.geocoronal,
+                            ratio = kwargs[ratio_param]
+                            )
+                        else:
+                            total[region_mask] += self._gaussian(
+                                wave[region_mask],
+                                line.rest_wavelength,
+                                kwargs[z_param],
+                                kwargs[sigma_param],
+                                kwargs[flux_param],
+                                doublet=line.doublet,
+                                geocoronal=line.geocoronal
+                            )
             
             return total
             
@@ -793,6 +859,13 @@ class JointSpectralFitter(SpectralFitter):
                           min=flux_constraints.get('min', 0),
                           vary=flux_constraints.get('vary', True),
                           expr=flux_constraints.get('expr', None))
+            if line.doublet and parameter_constraints.get(f"ratio_{line.name}", {}).get('vary', False):
+                ratio_name = f"ratio_{line.name}"
+                ratio_constraints = parameter_constraints.get(ratio_name, {})
+                params.add(ratio_name,
+                           value = ratio_constraints.get('min, 0.1'),
+                           max = ratio_constraints.get('max', 10.0),
+                           vary = ratio_constraints.get('vary', True))
         
         return Model(joint_model), params
     
@@ -1127,6 +1200,13 @@ class JointSpectralFitter(SpectralFitter):
         # Process each region
         for region in self.regions:
             for line in region.lines:
+                if line.doublet:
+                    ratio_key = f"ratio_{line.name}"
+                    if ratio_key in mcmc_result.var_names:
+                        ratio_percentiles = np.percentile(mcmc_result.flatchain[ratio_key], [16, 50, 84])
+                        print(f"\n{line.name} Doublet Ratio: {ratio_percentiles[1]:.3f} "
+                                f"(+{ratio_percentiles[2]-ratio_percentiles[1]:.3f}, "
+                                f"-{ratio_percentiles[1]-ratio_percentiles[0]:.3f})")
                 # Get flux parameter names for this line
                 flux_keys = [f"flux_{line.name}_{comp}" for comp in line.components]
                 
