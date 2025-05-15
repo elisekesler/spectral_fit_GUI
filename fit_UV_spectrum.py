@@ -11,7 +11,7 @@ import math
 import matplotlib.pyplot as plt
 import logging
 import logging.handlers as handlers
-
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import *
 from gaussian_fitfunctions import SpectralLine, DoubletInfo
 import csv
@@ -36,7 +36,12 @@ class GaussianWindow(QWidget):
         print(f'GaussianWindow init')
         self.setWindowTitle("Gaussian Fit Results")
         self.setGeometry(100, 100, 600, 400)
+
+        self.mcmc_result = mcmc_result
+        self.fitter = fitter
+        self.spectral_lines = spectral_lines
         layout = QVBoxLayout(self)
+
         # layout.addWidget(self.label)
         # self.setLayout(layout)
         
@@ -89,7 +94,11 @@ class GaussianWindow(QWidget):
         flux_table.horizontalHeader().setStretchLastSection(True)
         
         flux_layout.addWidget(flux_table)
-        
+
+        update_btn = QPushButton("Update Parameters to Best Fit")
+        update_btn.clicked.connect(self.update_parameters_to_best_fit)
+        layout.addWidget(update_btn)
+            
         # # Add export button
         # export_btn_layout = QHBoxLayout()
         # export_flux_btn = QPushButton("Export Flux Results")
@@ -179,8 +188,68 @@ class GaussianWindow(QWidget):
         # layout.addWidget(close_btn)
         
         # Define export functions
-        def export_flux_results():
+    def export_flux_results():
             print(f'buggy for now')
+    def update_parameters_to_best_fit(self):
+            """Update component parameters with the best fit values from MCMC"""
+            try:
+                # Access the parent application (main window)
+                parent_app = self.parent()
+                while parent_app and not isinstance(parent_app, SpectralFluxApp):
+                    parent_app = parent_app.parent()
+                
+                if not parent_app:
+                    QMessageBox.warning(self, "Error", "Could not find main application")
+                    return
+                # Check if MCMC result is available    
+                # Update component parameters with values from MCMC results
+                for line in self.spectral_lines:
+                    # Update ratio parameter if it's a doublet
+                    if line.doublet:
+                        ratio_key = f"ratio_{line.name}"
+                        if ratio_key in self.mcmc_result.var_names:
+                            ratio_value = np.median(self.mcmc_result.flatchain[ratio_key])
+                            if ratio_key not in parent_app.component_parameters:
+                                parent_app.component_parameters[ratio_key] = {}
+                            parent_app.component_parameters[ratio_key]['value'] = ratio_value
+                            parent_app.component_parameters[ratio_key]['min'] = max(0.1, ratio_value * 0.5)
+                            parent_app.component_parameters[ratio_key]['max'] = min(10.0, ratio_value * 2.0)
+                            parent_app.component_parameters[ratio_key]['vary'] = True
+                    
+                    # Update parameters for each component
+                    for comp in line.components:
+                        param_key = f"{line.name}_{comp}"
+                        
+                        # Get z and sigma from MCMC results
+                        z_key = f"z_{comp}"
+                        sigma_key = f"sigma_{comp}"
+                        flux_key = f"flux_{line.name}_{comp}"
+                        
+                        # Get median values from MCMC chains
+                        z_value = np.median(self.mcmc_result.flatchain[z_key])
+                        sigma_value = np.median(self.mcmc_result.flatchain[sigma_key])
+                        flux_value = np.median(self.mcmc_result.flatchain[flux_key])
+                        
+                        # Ensure component parameters dictionary exists
+                        if param_key not in parent_app.component_parameters:
+                            parent_app.component_parameters[param_key] = {}
+                        
+                        # Update values
+                        parent_app.component_parameters[param_key]['z_value'] = z_value
+                        parent_app.component_parameters[param_key]['z_min'] = max(0, z_value - 0.001)
+                        parent_app.component_parameters[param_key]['z_max'] = z_value + 0.001
+                        parent_app.component_parameters[param_key]['sigma_value'] = sigma_value
+                        parent_app.component_parameters[param_key]['sigma_min'] = max(10, sigma_value * 0.5)
+                        parent_app.component_parameters[param_key]['sigma_max'] = min(1000, sigma_value * 2.0)
+                        parent_app.component_parameters[param_key]['flux_value'] = flux_value
+                
+                # Save the updated parameters
+                parent_app.save_component_parameters()
+                
+                QMessageBox.information(self, "Success", "Parameters updated to best fit values and saved")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Error updating parameters: {str(e)}")
             # file_path, _ = QFileDialog.getSaveFileName(
             #     dialog, "Save Flux Results", "", "CSV Files (*.csv);;All Files (*)"
             # )
@@ -217,9 +286,9 @@ class SpectralFluxApp(QMainWindow):
         self.create_right_panel()  # Add this line
 
         self.setWindowTitle('Spectral Flux Measurement')
-        self.setGeometry(100, 100, 1200, 800)  # Make the window a bit wider
+        self.setGeometry(100, 100, 1500, 800)  # Make the window a bit wider
 
-        self.setMinimumSize(800, 600)  # Reasonable minimum size
+        self.setMinimumSize(900, 600)  # Reasonable minimum size
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         # self.setWindowTitle('Spectral Flux Measurement')
         # self.setGeometry(100, 100, 1000, 800)
@@ -235,6 +304,7 @@ class SpectralFluxApp(QMainWindow):
         self.cid = None  # Connection ID for event handler
         self.scale_value = 1e15 #value to scale the flux by
         self.flux_method = "Direct Integration"
+        self.continuum_line = None
 
         self.line_wavelengths = np.array([0.0,
             1215.67, 1031.92, 1037.61, 1238.82, 1242.8,
@@ -270,12 +340,13 @@ class SpectralFluxApp(QMainWindow):
         self.right_layout = QVBoxLayout()
         self.app_layout.addLayout(self.right_layout)
         
+        self.main_widget.resize(1500, 800)
         # Set the size ratio between left and right panels (2:1)
-        self.app_layout.setStretch(0, 2)
+        self.app_layout.setStretch(0, 4)
         self.app_layout.setStretch(1, 1)
 
     def create_plot_area(self):
-        self.figure = Figure(figsize=(10, 8))
+        self.figure = Figure(figsize=(12, 8))
         self.canvas = FigureCanvas(self.figure)
         self.main_layout.addWidget(self.canvas)
         self.toolbar = NavigationToolbar(self.canvas, self)
@@ -299,11 +370,13 @@ class SpectralFluxApp(QMainWindow):
         # Save Spectrum button
         self.save_button = QPushButton('Save Spectrum')
         self.save_button.clicked.connect(self.save_spectrum)
+        self.save_button.setMinimumWidth(150)
         self.controls_layout.addWidget(self.save_button)
 
         # Load Spectrum button
         self.load_spectrum_button = QPushButton('Load Spectrum')
         self.load_spectrum_button.clicked.connect(self.load_spectrum)
+        self.load_spectrum_button.setMinimumWidth(150)
         self.controls_layout.addWidget(self.load_spectrum_button)
 
         # Redshift label and input
@@ -336,6 +409,7 @@ class SpectralFluxApp(QMainWindow):
 
         # Line selection dropdown
         self.surrounding_label = QLabel('Plot area surrounding:')
+        self.surrounding_label.setMinimumWidth(100)
         self.surrounding_label.setWordWrap(True)
         self.controls_layout.addWidget(self.surrounding_label)
 
@@ -355,7 +429,7 @@ class SpectralFluxApp(QMainWindow):
     def create_table(self):
         # Table to display flux and flux error for each line
         self.table = QTableWidget(self)
-        self.table.setColumnCount(10)  # Reduced from 10 to 7 columns
+        self.table.setColumnCount(10) 
         self.table.setHorizontalHeaderLabels([
             'Line', 'Flux', 'Flux Error', 
             'Left Lower', 'Left Upper', 
@@ -380,6 +454,10 @@ class SpectralFluxApp(QMainWindow):
 
         self.main_layout.addWidget(self.table)
         self.table.resizeColumnsToContents()
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
         # Connect the row selection signal
@@ -1370,7 +1448,7 @@ class SpectralFluxApp(QMainWindow):
                         params.get('value', 0.5),  # ratio value
                         params.get('min', 0.1),    # ratio min
                         params.get('max', 10.0),   # ratio max
-                        params.get('vary', False)  # ratio vary
+                        params.get('vary', True)  # ratio vary
                     ])
                 else:
                     writer.writerow([
@@ -1669,10 +1747,10 @@ class SpectralFluxApp(QMainWindow):
             # When saving, update the component_parameters
             ratio_name = f"ratio_{spectral_line.name}"
             self.component_parameters[ratio_name] = {
-                'ratio_value': ratio_value.value(),
-                'ratio_min': 0.1,
-                'ratio_max': 10.0,
-                'ratio_vary': ratio_vary.isChecked()
+                'value': ratio_value.value(),
+                'min': 0.1,
+                'max': 10.0,
+                'vary': ratio_vary.isChecked()
             }
             comp_params_layout.addRow("Flux Ratio (variable):", ratio_value)
         # Add to layout
@@ -1839,6 +1917,7 @@ class SpectralFluxApp(QMainWindow):
         print(f'In this function, now attempting to open Gaussian Window')
         
         self.results_window  = GaussianWindow(fitter, mcmc_result, self.spectral_lines)
+        self.results_window.setParent(self, Qt.Window)
         self.results_window.show()
 
     def update_flux_results_in_table(self, mcmc_result):
@@ -2001,9 +2080,14 @@ class SpectralFluxApp(QMainWindow):
 
     def clear_fit_result_plot(self):
         for line in self.ax.lines:
-            if line in self.all_plotted_models:
-                print(f"Removing line: {line}")
-                line.remove()
+            x_data = line.get_xdata()
+            y_data = line.get_ydata()
+            for existing_line in self.all_plotted_models:
+                existing_x = existing_line.get_xdata()
+                existing_y = existing_line.get_ydata()
+                if np.array_equal(x_data, existing_x) and np.array_equal(y_data, existing_y):
+                    print(f"Removing line: {line}")
+                    line.remove()
         self.all_plotted_models = []
             
     def fit_gaussian_model(self):
@@ -2127,11 +2211,10 @@ class SpectralFluxApp(QMainWindow):
                 if ratio_key in self.component_parameters:
                     ratio_params = self.component_parameters[ratio_key]
                     if ratio_params.get('vary', False):
-                        print(f"Adding ratio parameter for {line.name}")
                         parameter_constraints[ratio_key] = {
-                            'value': ratio_params.get('ratio_value', line.doublet.ratio),
-                            'min': ratio_params.get('ratio_min', 0.1),
-                            'max': ratio_params.get('ratio_max', 5.0),
+                            'value': ratio_params.get('value', line.doublet.ratio),
+                            'min': max(0.01, ratio_params.get('min', 0.1)),  # Ensure positive
+                            'max': ratio_params.get('max', 5.0),
                             'vary': True
                         }
             for comp in line.components:
@@ -2926,7 +3009,8 @@ class SpectralFluxApp(QMainWindow):
         # Replot the spectrum with the continuum subtracted
         # self.figure.clear()
         # ax = self.figure.add_subplot(111)
-        self.ax.plot(wave, self.flux_after_subtraction, color='blue')
+        continuum_plot = self.ax.plot(wave, self.flux_after_subtraction, color='blue')
+        self.continuum_line.append(continuum_plot)
         self.ax.set_xlabel('Wavelength')
         self.ax.set_ylabel(f'Flux (erg / s / cm^2 / A ) (scaled by {self.scale_value})')
         self.canvas.draw()
@@ -2936,6 +3020,17 @@ class SpectralFluxApp(QMainWindow):
         if self.coadded_spectrum is None:
             self.statusBar().showMessage('No co-added spectrum to undo.')
             return
+        
+        for line in self.ax.lines:
+            x_data = line.get_xdata()
+            y_data = line.get_ydata()
+            if self.continuum_line is not None:
+                existing_x = self.continuum_line.get_xdata()
+                existing_y = self.continuum_line.get_ydata()
+                if np.array_equal(x_data, existing_x) and np.array_equal(y_data, existing_y):
+                    print(f"Removing continuum")
+                    line.remove()
+        self.continuum_line = None
 
         #self.statusBar().showMessage(f'Continuum subtraction undone for line: {self.line_labels[line_index]}')
         self.statusBar().showMessage(f'This is buggy... cut for now. Sorry!!')

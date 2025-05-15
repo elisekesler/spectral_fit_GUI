@@ -216,7 +216,7 @@ class SpectralFitter:
             
             # Add secondary line with specified ratio
             flux_ratio = ratio if ratio is not None else doublet.ratio
-            flux_ratio = max(1e-6, flux_ratio)
+            flux_ratio = max(0.01, flux_ratio)
             flux_2 = flux * flux_ratio
             normalization_2 = max(1e-10, sigma_wave_2 * np.sqrt(2*np.pi))
             peak_2 = flux_2 / normalization_2
@@ -859,13 +859,14 @@ class JointSpectralFitter(SpectralFitter):
                           min=flux_constraints.get('min', 0),
                           vary=flux_constraints.get('vary', True),
                           expr=flux_constraints.get('expr', None))
-            if line.doublet and parameter_constraints.get(f"ratio_{line.name}", {}).get('vary', False):
-                ratio_name = f"ratio_{line.name}"
-                ratio_constraints = parameter_constraints.get(ratio_name, {})
-                params.add(ratio_name,
-                           value = ratio_constraints.get('min, 0.1'),
-                           max = ratio_constraints.get('max', 10.0),
-                           vary = ratio_constraints.get('vary', True))
+        if line.doublet and parameter_constraints.get(f"ratio_{line.name}", {}).get('vary', False):
+            ratio_name = f"ratio_{line.name}"
+            ratio_constraints = parameter_constraints.get(ratio_name, {})
+            params.add(ratio_name,
+                    value=ratio_constraints.get('value', line.doublet.ratio),  # FIX HERE
+                    min=ratio_constraints.get('min', 0.1),  # ADD min constraint
+                    max=ratio_constraints.get('max', 10.0),
+                    vary=ratio_constraints.get('vary', True))
         
         return Model(joint_model), params
     
