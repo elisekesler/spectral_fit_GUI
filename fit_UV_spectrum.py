@@ -11,7 +11,7 @@ import math
 import matplotlib.pyplot as plt
 import logging
 import logging.handlers as handlers
-
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import *
 from gaussian_fitfunctions import SpectralLine, DoubletInfo
 import csv
@@ -36,7 +36,12 @@ class GaussianWindow(QWidget):
         print(f'GaussianWindow init')
         self.setWindowTitle("Gaussian Fit Results")
         self.setGeometry(100, 100, 600, 400)
+
+        self.mcmc_result = mcmc_result
+        self.fitter = fitter
+        self.spectral_lines = spectral_lines
         layout = QVBoxLayout(self)
+
         # layout.addWidget(self.label)
         # self.setLayout(layout)
         
@@ -89,7 +94,11 @@ class GaussianWindow(QWidget):
         flux_table.horizontalHeader().setStretchLastSection(True)
         
         flux_layout.addWidget(flux_table)
-        
+
+        update_btn = QPushButton("Update Parameters to Best Fit")
+        update_btn.clicked.connect(self.update_parameters_to_best_fit)
+        layout.addWidget(update_btn)
+            
         # # Add export button
         # export_btn_layout = QHBoxLayout()
         # export_flux_btn = QPushButton("Export Flux Results")
@@ -179,8 +188,68 @@ class GaussianWindow(QWidget):
         # layout.addWidget(close_btn)
         
         # Define export functions
-        def export_flux_results():
+    def export_flux_results():
             print(f'buggy for now')
+    def update_parameters_to_best_fit(self):
+            """Update component parameters with the best fit values from MCMC"""
+            try:
+                # Access the parent application (main window)
+                parent_app = self.parent()
+                while parent_app and not isinstance(parent_app, SpectralFluxApp):
+                    parent_app = parent_app.parent()
+                
+                if not parent_app:
+                    QMessageBox.warning(self, "Error", "Could not find main application")
+                    return
+                # Check if MCMC result is available    
+                # Update component parameters with values from MCMC results
+                for line in self.spectral_lines:
+                    # Update ratio parameter if it's a doublet
+                    if line.doublet:
+                        ratio_key = f"ratio_{line.name}"
+                        if ratio_key in self.mcmc_result.var_names:
+                            ratio_value = np.median(self.mcmc_result.flatchain[ratio_key])
+                            if ratio_key not in parent_app.component_parameters:
+                                parent_app.component_parameters[ratio_key] = {}
+                            parent_app.component_parameters[ratio_key]['value'] = ratio_value
+                            parent_app.component_parameters[ratio_key]['min'] = max(0.1, ratio_value * 0.5)
+                            parent_app.component_parameters[ratio_key]['max'] = min(10.0, ratio_value * 2.0)
+                            parent_app.component_parameters[ratio_key]['vary'] = True
+                    
+                    # Update parameters for each component
+                    for comp in line.components:
+                        param_key = f"{line.name}_{comp}"
+                        
+                        # Get z and sigma from MCMC results
+                        z_key = f"z_{comp}"
+                        sigma_key = f"sigma_{comp}"
+                        flux_key = f"flux_{line.name}_{comp}"
+                        
+                        # Get median values from MCMC chains
+                        z_value = np.median(self.mcmc_result.flatchain[z_key])
+                        sigma_value = np.median(self.mcmc_result.flatchain[sigma_key])
+                        flux_value = np.median(self.mcmc_result.flatchain[flux_key])
+                        
+                        # Ensure component parameters dictionary exists
+                        if param_key not in parent_app.component_parameters:
+                            parent_app.component_parameters[param_key] = {}
+                        
+                        # Update values
+                        parent_app.component_parameters[param_key]['z_value'] = z_value
+                        parent_app.component_parameters[param_key]['z_min'] = max(0, z_value - 0.001)
+                        parent_app.component_parameters[param_key]['z_max'] = z_value + 0.001
+                        parent_app.component_parameters[param_key]['sigma_value'] = sigma_value
+                        parent_app.component_parameters[param_key]['sigma_min'] = max(10, sigma_value * 0.5)
+                        parent_app.component_parameters[param_key]['sigma_max'] = min(1000, sigma_value * 2.0)
+                        parent_app.component_parameters[param_key]['flux_value'] = flux_value
+                
+                # Save the updated parameters
+                parent_app.save_component_parameters()
+                
+                QMessageBox.information(self, "Success", "Parameters updated to best fit values and saved")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Error updating parameters: {str(e)}")
             # file_path, _ = QFileDialog.getSaveFileName(
             #     dialog, "Save Flux Results", "", "CSV Files (*.csv);;All Files (*)"
             # )
@@ -217,9 +286,9 @@ class SpectralFluxApp(QMainWindow):
         self.create_right_panel()  # Add this line
 
         self.setWindowTitle('Spectral Flux Measurement')
-        self.setGeometry(100, 100, 1200, 800)  # Make the window a bit wider
+        self.setGeometry(100, 100, 1500, 800)  # Make the window a bit wider
 
-        self.setMinimumSize(800, 600)  # Reasonable minimum size
+        self.setMinimumSize(900, 600)  # Reasonable minimum size
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         # self.setWindowTitle('Spectral Flux Measurement')
         # self.setGeometry(100, 100, 1000, 800)
@@ -235,6 +304,7 @@ class SpectralFluxApp(QMainWindow):
         self.cid = None  # Connection ID for event handler
         self.scale_value = 1e15 #value to scale the flux by
         self.flux_method = "Direct Integration"
+        self.continuum_line = None
 
         self.line_wavelengths = np.array([0.0,
             1215.67, 1031.92, 1037.61, 1238.82, 1242.8,
@@ -245,6 +315,23 @@ class SpectralFluxApp(QMainWindow):
             'Lya', 'O VI 1031', 'O VI 1037', 'N V 1238',
             'N V 1242', 'Si 1393', 'Si 1402', 'C IV 1548', 'C IV 1550'
         ]
+        # Add this after the existing line_wavelengths
+        self.optical_line_wavelengths = np.array([
+            0.0,  # Placeholder for "Full Spectrum"
+            4861.33,  # Hβ
+            4958.911, 5006.843,  # [OIII] doublet
+            6548.05, 6583.45,  # [NII] doublet
+            6562.8,  # Hα
+        ])
+
+        self.optical_line_labels = [
+            'Full Spectrum',
+            'Hb', 
+            '[OIII] 4958', '[OIII] 5006',
+            '[NII] 6548', '[NII] 6583', 'Ha',
+        ]
+
+
 
         # Variables for plotting selection overlays
         self.drawn_spectral_lines = []
@@ -270,17 +357,78 @@ class SpectralFluxApp(QMainWindow):
         self.right_layout = QVBoxLayout()
         self.app_layout.addLayout(self.right_layout)
         
+        self.main_widget.resize(1500, 800)
         # Set the size ratio between left and right panels (2:1)
-        self.app_layout.setStretch(0, 2)
+        self.app_layout.setStretch(0, 4)
         self.app_layout.setStretch(1, 1)
 
     def create_plot_area(self):
-        self.figure = Figure(figsize=(10, 8))
+        self.figure = Figure(figsize=(12, 8))
         self.canvas = FigureCanvas(self.figure)
         self.main_layout.addWidget(self.canvas)
         self.toolbar = NavigationToolbar(self.canvas, self)
         self.main_layout.addWidget(self.toolbar)
-
+    def view_optical_spectrum(self):
+        """Load and display the optical spectrum for the selected object"""
+        # Get the selected row
+        selected_rows = self.objects_table.selectionModel().selectedRows()
+        if not selected_rows:
+            self.statusBar().showMessage("No object selected")
+            return
+            
+        row_index = selected_rows[0].row()
+        
+        # Get the optical fits path from column 11 (Optical_fits)
+        optical_fits_item = self.objects_table.item(row_index, 11)
+        if not optical_fits_item or not optical_fits_item.text():
+            # If empty, ask user to select a file
+            options = QFileDialog.Options()
+            optical_fits_path, _ = QFileDialog.getOpenFileName(
+                self, "Select Optical Spectrum", "", "FITS Files (*.fits);;All Files (*)", options=options
+            )
+            
+            if not optical_fits_path:
+                self.statusBar().showMessage("No optical spectrum selected")
+                return
+                
+            # Save the path in the table
+            self.objects_table.setItem(row_index, 11, QTableWidgetItem(optical_fits_path))
+        else:
+            optical_fits_path = optical_fits_item.text()
+        
+        # Check if file exists
+        if not os.path.exists(optical_fits_path):
+            self.statusBar().showMessage(f"Optical spectrum file not found: {optical_fits_path}")
+            return
+        
+        # Load the optical spectrum
+        try:
+            hdul = fits.open(optical_fits_path)
+            data = hdul[1].data
+            
+            # Store current UV spectrum if exists
+            if hasattr(self, 'coadded_spectrum'):
+                self.uv_spectrum_backup = self.coadded_spectrum.copy()
+            
+            # data['wave'] = 10.0**data['loglam']
+            # data['error'] = np.sqrt(1/(data['ivar']))
+            # Create optical spectrum dictionary with the same structure as UV
+            self.coadded_spectrum = {
+                'wave': 10.0**data['loglam'],
+                'flux': data['flux'],
+                'error_up': np.sqrt(1/(data['ivar'])),
+                'error_down': 0,
+                'counts': 0,
+                'is_optical': True  # Flag to indicate this is optical data
+            }
+            
+            # Plot the optical spectrum
+            self.plot_optical_spectrum()
+            self.statusBar().showMessage(f'Optical spectrum loaded from {optical_fits_path}')
+            
+        except Exception as e:
+            self.statusBar().showMessage(f'Error loading optical spectrum: {e}')
+            print(f"Error details: {str(e)}")
     def create_controls(self):
         self.controls_layout = QHBoxLayout()
         self.main_layout.addLayout(self.controls_layout)
@@ -299,11 +447,13 @@ class SpectralFluxApp(QMainWindow):
         # Save Spectrum button
         self.save_button = QPushButton('Save Spectrum')
         self.save_button.clicked.connect(self.save_spectrum)
+        self.save_button.setMinimumWidth(150)
         self.controls_layout.addWidget(self.save_button)
 
         # Load Spectrum button
         self.load_spectrum_button = QPushButton('Load Spectrum')
         self.load_spectrum_button.clicked.connect(self.load_spectrum)
+        self.load_spectrum_button.setMinimumWidth(150)
         self.controls_layout.addWidget(self.load_spectrum_button)
 
         # Redshift label and input
@@ -336,6 +486,7 @@ class SpectralFluxApp(QMainWindow):
 
         # Line selection dropdown
         self.surrounding_label = QLabel('Plot area surrounding:')
+        self.surrounding_label.setMinimumWidth(100)
         self.surrounding_label.setWordWrap(True)
         self.controls_layout.addWidget(self.surrounding_label)
 
@@ -355,7 +506,7 @@ class SpectralFluxApp(QMainWindow):
     def create_table(self):
         # Table to display flux and flux error for each line
         self.table = QTableWidget(self)
-        self.table.setColumnCount(10)  # Reduced from 10 to 7 columns
+        self.table.setColumnCount(10) 
         self.table.setHorizontalHeaderLabels([
             'Line', 'Flux', 'Flux Error', 
             'Left Lower', 'Left Upper', 
@@ -380,6 +531,10 @@ class SpectralFluxApp(QMainWindow):
 
         self.main_layout.addWidget(self.table)
         self.table.resizeColumnsToContents()
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
         # Connect the row selection signal
@@ -547,52 +702,52 @@ class SpectralFluxApp(QMainWindow):
     def read_line_measurements_from_csv(self, csv_path):
         """Read line measurements from CSV and update the left table"""
         try:
-            # Define the mapping between CSV rows and table rows
-            # This assumes your CSV has a specific structure for line measurements
-            line_row_mapping = {
-                "Lya": 0,
-                "OVI": 1,
-                "NV": 2,
-                "CIV": 3,
-            }
-            
-            # Try to read the CSV as a table with line names as rows
-            import pandas as pd
-            try:
-                df = pd.read_csv(csv_path, index_col=0)
+            # Read the CSV
+            with open(csv_path, 'r') as csvfile:
+                reader = csv.reader(csvfile)
                 
-                # Update the left table with values from the DataFrame
-                for line_name, table_row in line_row_mapping.items():
-                    if line_name in df.index:
-                        line_data = df.loc[line_name]
-                        
-                        # Update flux value if available
-                        if 'Flux' in line_data:
-                            self.table.setItem(table_row, 1, QTableWidgetItem(str(line_data['Flux'])))
-                        
-                        # Update error value if available
-                        if 'Flux_Error' in line_data:
-                            self.table.setItem(table_row, 2, QTableWidgetItem(str(line_data['Flux_Error'])))
-                        
-                        # Update continuum bounds if available
-                        if 'Left_Lower' in line_data:
-                            self.table.setItem(table_row, 3, QTableWidgetItem(str(line_data['Left_Lower'])))
-                        if 'Left_Upper' in line_data:
-                            self.table.setItem(table_row, 4, QTableWidgetItem(str(line_data['Left_Upper'])))
-                        if 'Right_Lower' in line_data:
-                            self.table.setItem(table_row, 5, QTableWidgetItem(str(line_data['Right_Lower'])))
-                        if 'Right_Upper' in line_data:
-                            self.table.setItem(table_row, 6, QTableWidgetItem(str(line_data['Right_Upper'])))
-                        if 'Slope' in line_data:
-                            self.table.setItem(table_row, 7, QTableWidgetItem(str(line_data['Slope'])))
-                        if 'Intercept' in line_data:
-                            self.table.setItem(table_row, 8, QTableWidgetItem(str(line_data['Intercept'])))
-            except Exception as e:
-                self.statusBar().showMessage(f"Could not read line measurements: {str(e)}")
+                # Skip header rows
+                header_row = next(reader, None)  # First row should have "Redshift"
+                redshift_row = next(reader, None)  # Second row should have the redshift value
+                columns_row = next(reader, None)  # Third row should have column headers
+                
+                if not header_row or not redshift_row or not columns_row:
+                    self.statusBar().showMessage("CSV file has invalid format")
+                    return
+                
+                # Load redshift if available
+                if header_row[0] == "Redshift" and redshift_row:
+                    try:
+                        self.redshift = float(redshift_row[0])
+                        self.redshift_input.setText(str(self.redshift))
+                    except (ValueError, IndexError):
+                        self.statusBar().showMessage("Could not read redshift from CSV")
+                
+                # Process line measurements
+                line_rows = list(reader)  # Remaining rows are line measurements
+                
+                # Clear the table first
+                self.table.setRowCount(0)
+                
+                # Add each line to the table
+                for row_data in line_rows:
+                    if not row_data or len(row_data) < 1:
+                        continue
+                    
+                    line_name = row_data[0]
+                    
+                    # Add a new row for this line
+                    row = self.add_optical_line_row(line_name)
+                    
+                    # Fill in values if they exist
+                    for col in range(1, min(len(row_data), self.table.columnCount())):
+                        if col < len(row_data) and row_data[col]:
+                            self.table.setItem(row, col, QTableWidgetItem(row_data[col]))
                 
         except Exception as e:
             self.statusBar().showMessage(f"Error reading line measurements from CSV: {str(e)}")
-
+            import traceback
+            print(traceback.format_exc())
     def update_object_csv_from_left_table(self, row_index):
         """Update the individual object CSV file with data from the left table"""
         # Get the object CSV path
@@ -608,10 +763,8 @@ class SpectralFluxApp(QMainWindow):
             for col in range(self.table.columnCount()):
                 headers.append(self.table.horizontalHeaderItem(col).text())
             
-            # Create a list to store the rows
-            rows = [headers]  # First row is the header
-            
             # Extract all data from the left table
+            rows = []
             for row in range(self.table.rowCount()):
                 row_data = []
                 for col in range(self.table.columnCount()):
@@ -621,10 +774,14 @@ class SpectralFluxApp(QMainWindow):
             
             # Save to CSV with redshift as the first row
             with open(csv_path, 'w', newline='') as csvfile:
-                # First write the redshift
                 writer = csv.writer(csvfile)
+                
+                # First write the redshift
                 writer.writerow(["Redshift"])
                 writer.writerow([str(self.redshift)])
+                
+                # Then write the column headers
+                writer.writerow(headers)
                 
                 # Then write the table data
                 for row in rows:
@@ -633,7 +790,6 @@ class SpectralFluxApp(QMainWindow):
             self.statusBar().showMessage(f"Updated object CSV: {csv_path}")
         except Exception as e:
             self.statusBar().showMessage(f"Error updating object CSV: {str(e)}")
-
     def update_line_values_from_object_csv(self, row_index):
         """Update the line values in the left table from the selected object's CSV file"""
         # Get the object CSV path
@@ -823,10 +979,10 @@ class SpectralFluxApp(QMainWindow):
     def create_right_panel(self):
         # Create a table for object data
         self.objects_table = QTableWidget()
-        self.objects_table.setColumnCount(11)
+        self.objects_table.setColumnCount(12)
         self.objects_table.setHorizontalHeaderLabels([
             "Object Name", "Lya", "Lya_err", "OVI", "OVI_err", 
-            "CIV", "CIV_err", "NV", "NV_err", "Object_csv", "Object_fits"
+            "CIV", "CIV_err", "NV", "NV_err", "Object_csv", "Object_fits", "Optical_fits"
         ])
         
         # Make the table take up most of the right panel
@@ -847,7 +1003,17 @@ class SpectralFluxApp(QMainWindow):
         self.save_csv_button = QPushButton("Save CSV")
         self.save_csv_button.clicked.connect(self.save_objects_csv)
         button_layout.addWidget(self.save_csv_button)
-        
+
+        # After creating the other buttons in button_layout
+        self.view_optical_button = QPushButton("View Optical Spectrum")
+        self.view_optical_button.clicked.connect(self.view_optical_spectrum)
+        button_layout.addWidget(self.view_optical_button)
+
+        # Add this to the button_layout in create_right_panel
+        self.view_uv_button = QPushButton("Return to UV Spectrum")
+        self.view_uv_button.clicked.connect(self.return_to_uv_spectrum)
+        button_layout.addWidget(self.view_uv_button)
+        # Add the "load spectrum" button    
         # Add the button layout to the right panel
         self.right_layout.addLayout(button_layout)
         
@@ -1003,7 +1169,12 @@ class SpectralFluxApp(QMainWindow):
         self.undo_button = QPushButton("Undo Continuum")
         self.undo_button.clicked.connect(self.undo_continuum_on_selected_line)
         buttons_layout.addWidget(self.undo_button)
-        
+
+        # Add this to the button_layout in create_detailed_controls
+        self.add_optical_line_button = QPushButton("Add Optical Line")
+        self.add_optical_line_button.clicked.connect(self.add_optical_line_dialog)
+        buttons_layout.addWidget(self.add_optical_line_button)
+                
         self.method_layout.addLayout(buttons_layout)
         
         # Initially disable the buttons until a line is selected
@@ -1072,7 +1243,66 @@ class SpectralFluxApp(QMainWindow):
                     child = item.layout().takeAt(0)
                     if child.widget():
                         child.widget().deleteLater()
-
+    def add_optical_line_dialog(self):
+        """Show dialog to add a new optical line to measure"""
+        # Create a dialog with predefined optical lines and custom option
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add Optical Line")
+        layout = QVBoxLayout(dialog)
+        
+        # Create a list of common optical lines
+        common_lines = [
+            "Ha", "Hb", "Hg", "Hd",
+            "[OIII] 4958", "[OIII] 5006", 
+            "[NII] 6548", "[NII] 6583", 
+        ]
+        
+        # Add radio buttons for selection type
+        predefined_radio = QRadioButton("Common optical line")
+        custom_radio = QRadioButton("Custom line")
+        predefined_radio.setChecked(True)
+        
+        layout.addWidget(predefined_radio)
+        layout.addWidget(custom_radio)
+        
+        # Add dropdown for predefined lines
+        line_combo = QComboBox()
+        line_combo.addItems(common_lines)
+        layout.addWidget(line_combo)
+        
+        # Add custom line input
+        custom_input = QLineEdit()
+        custom_input.setPlaceholderText("Enter line name (e.g., 'HeI 5876')")
+        custom_input.setEnabled(False)
+        layout.addWidget(custom_input)
+        
+        # Connect radio buttons to enable/disable inputs
+        predefined_radio.toggled.connect(lambda checked: line_combo.setEnabled(checked))
+        custom_radio.toggled.connect(lambda checked: custom_input.setEnabled(checked))
+        
+        # Add OK/Cancel buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+        
+        # Execute dialog
+        if dialog.exec_() == QDialog.Accepted:
+            if predefined_radio.isChecked():
+                line_name = line_combo.currentText()
+            else:
+                line_name = custom_input.text()
+            
+            if line_name:
+                # Check if this line already exists
+                for row in range(self.table.rowCount()):
+                    if self.table.item(row, 0) and self.table.item(row, 0).text() == line_name:
+                        self.statusBar().showMessage(f"Line '{line_name}' already exists in the table")
+                        return
+                
+                # Add the new line to the table
+                new_row = self.add_optical_line_row(line_name)
+                self.statusBar().showMessage(f"Added line '{line_name}' to the table")
     def save_objects_csv(self):
         options = QFileDialog.Options()
         csv_file, _ = QFileDialog.getSaveFileName(
@@ -1136,7 +1366,25 @@ class SpectralFluxApp(QMainWindow):
             self.load_fits_files()
         except Exception as e:
             self.statusBar().showMessage(f'Error loading CSV: {e}')
-
+    def add_optical_line_row(self, line_name):
+        """Add a new row for an optical line to the table"""
+        # Get current row count
+        current_row_count = self.table.rowCount()
+        
+        # Add a new row
+        self.table.setRowCount(current_row_count + 1)
+        
+        # Set the line name in the first column
+        self.table.setItem(current_row_count, 0, QTableWidgetItem(line_name))
+        
+        # Initialize other columns empty
+        for col in range(1, self.table.columnCount()):
+            self.table.setItem(current_row_count, col, QTableWidgetItem(""))
+        
+        # Make sure table is properly sized
+        self.table.resizeColumnsToContents()
+        
+        return current_row_count
     def update_redshift(self):
         try:
             new_redshift = float(self.redshift_input.text())
@@ -1197,7 +1445,66 @@ class SpectralFluxApp(QMainWindow):
         except ValueError:
             self.statusBar().showMessage('Invalid scale value')
             self.scale_input.setText(f"{self.scale_value:.2e}")  # Revert with scientific notation
+    def plot_optical_spectrum(self):
+        """Plot the loaded optical spectrum with optical emission lines"""
+        if not hasattr(self, 'coadded_spectrum') or not self.coadded_spectrum.get('is_optical', False):
+            self.statusBar().showMessage('No optical spectrum to plot')
+            return
+            
+        wave = self.coadded_spectrum['wave']
+        flux = self.coadded_spectrum['flux']
+        error_up = self.coadded_spectrum['error_up']
+        error_down = self.coadded_spectrum['error_down']
+        
+        # Clear the figure and create new plot
+        self.figure.clear()
+        self.ax = self.figure.add_subplot(111)
+        
+        # Plot the spectrum
+        self.ax.plot(wave, flux, color='black', drawstyle='steps-mid')
+        self.ax.plot(wave, (error_up + error_down)/2, color='grey', drawstyle='steps-mid')
+        
+        # Set axis labels
+        self.ax.set_xlabel('Wavelength (Å)')
+        self.ax.set_ylabel(f'Flux (erg / s / cm^2 / A ) (scaled by {self.scale_value:0.2e})')
+        
+        # Plot expected optical lines
+        self.plot_expected_optical_lines()
+        
+        # Set appropriate wavelength range
+        min_wave = np.min(wave)
+        max_wave = np.max(wave)
+        self.ax.set_xlim(min_wave, max_wave)
+        
+        # Redraw the canvas
+        self.canvas.draw()
+        
+        # Update the line dropdown with optical lines
+        current_index = self.line_dropdown.currentIndex()
+        self.line_dropdown.clear()
+        self.line_dropdown.addItems(self.optical_line_labels)
+        self.line_dropdown.setCurrentIndex(current_index if current_index < len(self.optical_line_labels) else 0)
 
+    def plot_expected_optical_lines(self, ax=None):
+        """Plot expected optical emission lines based on redshift"""
+        try:
+            redshift = float(self.redshift_input.text()) if self.redshift_input.text() else self.redshift
+            observed_lines = self.optical_line_wavelengths * (1 + redshift)
+            colors = ['r', 'g', 'b', 'orange', 'purple', 'pink', 'yellow', 'darkblue', 'black', 'brown', 'teal']
+            
+            if ax is None:
+                ax = self.figure.gca()
+                
+            self.drawn_spectral_lines = []  # Clear previous lines
+            
+            for i, line in enumerate(observed_lines[1:]):  # Skip 'Full Spectrum' placeholder
+                if line >= ax.get_xlim()[0] and line <= ax.get_xlim()[1]:  # Only plot lines in view
+                    thisline = ax.axvline(x=line, linestyle='--', color=colors[i % len(colors)])
+                    self.drawn_spectral_lines.append(thisline)
+                    ax.text(line, ax.get_ylim()[1] * 0.5, self.optical_line_labels[i+1],
+                            color=colors[i % len(colors)], rotation=90, verticalalignment='bottom')
+        except ValueError:
+            self.statusBar().showMessage('Invalid redshift input. Please enter a valid number.')
     def create_spectral_line_entry(self, name, rest_wavelength, doublet_info=None, geocoronal=False):
         """Create a visual entry for a spectral line and add to the UI"""
         print(f'CREATING SPECTRAL LINE ENTRY: {name}, {rest_wavelength}, {doublet_info}, {geocoronal}')
@@ -1370,7 +1677,7 @@ class SpectralFluxApp(QMainWindow):
                         params.get('value', 0.5),  # ratio value
                         params.get('min', 0.1),    # ratio min
                         params.get('max', 10.0),   # ratio max
-                        params.get('vary', False)  # ratio vary
+                        params.get('vary', True)  # ratio vary
                     ])
                 else:
                     writer.writerow([
@@ -1669,10 +1976,10 @@ class SpectralFluxApp(QMainWindow):
             # When saving, update the component_parameters
             ratio_name = f"ratio_{spectral_line.name}"
             self.component_parameters[ratio_name] = {
-                'ratio_value': ratio_value.value(),
-                'ratio_min': 0.1,
-                'ratio_max': 10.0,
-                'ratio_vary': ratio_vary.isChecked()
+                'value': ratio_value.value(),
+                'min': 0.1,
+                'max': 10.0,
+                'vary': ratio_vary.isChecked()
             }
             comp_params_layout.addRow("Flux Ratio (variable):", ratio_value)
         # Add to layout
@@ -1839,6 +2146,7 @@ class SpectralFluxApp(QMainWindow):
         print(f'In this function, now attempting to open Gaussian Window')
         
         self.results_window  = GaussianWindow(fitter, mcmc_result, self.spectral_lines)
+        self.results_window.setParent(self, Qt.Window)
         self.results_window.show()
 
     def update_flux_results_in_table(self, mcmc_result):
@@ -2001,9 +2309,14 @@ class SpectralFluxApp(QMainWindow):
 
     def clear_fit_result_plot(self):
         for line in self.ax.lines:
-            if line in self.all_plotted_models:
-                print(f"Removing line: {line}")
-                line.remove()
+            x_data = line.get_xdata()
+            y_data = line.get_ydata()
+            for existing_line in self.all_plotted_models:
+                existing_x = existing_line.get_xdata()
+                existing_y = existing_line.get_ydata()
+                if np.array_equal(x_data, existing_x) and np.array_equal(y_data, existing_y):
+                    print(f"Removing line: {line}")
+                    line.remove()
         self.all_plotted_models = []
             
     def fit_gaussian_model(self):
@@ -2127,11 +2440,10 @@ class SpectralFluxApp(QMainWindow):
                 if ratio_key in self.component_parameters:
                     ratio_params = self.component_parameters[ratio_key]
                     if ratio_params.get('vary', False):
-                        print(f"Adding ratio parameter for {line.name}")
                         parameter_constraints[ratio_key] = {
-                            'value': ratio_params.get('ratio_value', line.doublet.ratio),
-                            'min': ratio_params.get('ratio_min', 0.1),
-                            'max': ratio_params.get('ratio_max', 5.0),
+                            'value': ratio_params.get('value', line.doublet.ratio),
+                            'min': max(0.01, ratio_params.get('min', 0.1)),  # Ensure positive
+                            'max': ratio_params.get('max', 5.0),
                             'vary': True
                         }
             for comp in line.components:
@@ -2926,7 +3238,8 @@ class SpectralFluxApp(QMainWindow):
         # Replot the spectrum with the continuum subtracted
         # self.figure.clear()
         # ax = self.figure.add_subplot(111)
-        self.ax.plot(wave, self.flux_after_subtraction, color='blue')
+        continuum_plot = self.ax.plot(wave, self.flux_after_subtraction, color='blue')
+        self.continuum_line.append(continuum_plot)
         self.ax.set_xlabel('Wavelength')
         self.ax.set_ylabel(f'Flux (erg / s / cm^2 / A ) (scaled by {self.scale_value})')
         self.canvas.draw()
@@ -2936,6 +3249,17 @@ class SpectralFluxApp(QMainWindow):
         if self.coadded_spectrum is None:
             self.statusBar().showMessage('No co-added spectrum to undo.')
             return
+        
+        for line in self.ax.lines:
+            x_data = line.get_xdata()
+            y_data = line.get_ydata()
+            if self.continuum_line is not None:
+                existing_x = self.continuum_line.get_xdata()
+                existing_y = self.continuum_line.get_ydata()
+                if np.array_equal(x_data, existing_x) and np.array_equal(y_data, existing_y):
+                    print(f"Removing continuum")
+                    line.remove()
+        self.continuum_line = None
 
         #self.statusBar().showMessage(f'Continuum subtraction undone for line: {self.line_labels[line_index]}')
         self.statusBar().showMessage(f'This is buggy... cut for now. Sorry!!')
@@ -2979,7 +3303,24 @@ class SpectralFluxApp(QMainWindow):
             self.canvas.draw()
         else:
             self.statusBar().showMessage('No co-added spectrum to plot')
-
+    def return_to_uv_spectrum(self):
+        """Return to the previously loaded UV spectrum"""
+        if hasattr(self, 'uv_spectrum_backup'):
+            self.coadded_spectrum = self.uv_spectrum_backup
+            self.coadded_spectrum['is_optical'] = False
+            
+            # Plot the UV spectrum
+            self.plot_spectrum()
+            
+            # Restore UV lines in dropdown
+            current_index = self.line_dropdown.currentIndex()
+            self.line_dropdown.clear()
+            self.line_dropdown.addItems(self.line_labels)
+            self.line_dropdown.setCurrentIndex(current_index if current_index < len(self.line_labels) else 0)
+            
+            self.statusBar().showMessage('Returned to UV spectrum')
+        else:
+            self.statusBar().showMessage('No UV spectrum available')
     def clear_all_lines(self):
         try:
             if len(self.ax.lines) > 0:
@@ -3008,22 +3349,35 @@ class SpectralFluxApp(QMainWindow):
     def zoom_to_line(self):
         if self.coadded_spectrum:
             selected_line = self.line_dropdown.currentIndex()
-            rest_frame_wavelength = self.line_wavelengths[selected_line] * (1 + self.redshift)
+            is_optical = self.coadded_spectrum.get('is_optical', False)
+            
+            # Use the appropriate line wavelengths based on spectrum type
+            if is_optical:
+                rest_frame_wavelength = self.optical_line_wavelengths[selected_line] * (1 + self.redshift)
+                line_labels = self.optical_line_labels
+            else:
+                rest_frame_wavelength = self.line_wavelengths[selected_line] * (1 + self.redshift)
+                line_labels = self.line_labels
+            
             wave = self.coadded_spectrum['wave']
             flux = self.coadded_spectrum['flux']
             error_up = self.coadded_spectrum['error_up']
             error_down = self.coadded_spectrum['error_down']
 
-            if self.line_labels[selected_line] == 'Full Spectrum':
+            if line_labels[selected_line] == 'Full Spectrum':
                 # Plot the full spectrum
-                # self.figure.clear()
-                # self.ax = self.figure.add_subplot(111)
                 ax = self.ax
                 ax.plot(wave, flux, color='black', drawstyle='steps-mid')
                 ax.plot(wave, (error_up + error_down)/2, color='grey', drawstyle='steps-mid')
                 ax.set_xlabel('Wavelength')
                 ax.set_ylabel(f'Flux (erg / s / cm^2 / A ) (scaled by {self.scale_value:0.2e})')
-                self.plot_expected_lines(ax)
+                
+                # Plot appropriate line markers based on spectrum type
+                if is_optical:
+                    self.plot_expected_optical_lines(ax)
+                else:
+                    self.plot_expected_lines(ax)
+                    
                 self.canvas.draw()
             else:
                 zoom_range = (rest_frame_wavelength - 50, rest_frame_wavelength + 50)
@@ -3031,8 +3385,6 @@ class SpectralFluxApp(QMainWindow):
                 wave_zoom = wave[mask]
                 flux_zoom = flux[mask]
 
-                # self.figure.clear()
-                # self.ax = self.figure.add_subplot(111)
                 ax = self.ax
                 ax.plot(wave, flux, color='black', drawstyle='steps-mid')
                 ax.plot(wave, (error_up + error_down)/2, color='grey', drawstyle='steps-mid')
@@ -3040,15 +3392,31 @@ class SpectralFluxApp(QMainWindow):
                 ax.set_ylim(0, np.max(flux_zoom[~np.isnan(flux_zoom)]) * 1.1)
                 ax.set_xlabel('Wavelength')
                 ax.set_ylabel(f'Flux (erg / s / cm^2 / A ) (scaled by {self.scale_value:0.2e})')
-                self.plot_expected_lines(ax)
+                
+                # Plot appropriate line markers based on spectrum type
+                if is_optical:
+                    self.plot_expected_optical_lines(ax)
+                else:
+                    self.plot_expected_lines(ax)
+                    
                 self.canvas.draw()
         else:
-            self.statusBar().showMessage('No co-added spectrum to zoom into')
-
+            self.statusBar().showMessage('No spectrum to zoom into')
     def find_flux_for_line(self, line_index):
         self.current_line = line_index
         self.selection_step = 0
-        self.statusBar().showMessage(f'Select left continuum start for {self.line_labels[line_index]}')
+        
+        # Use appropriate line labels based on current spectrum type
+        row_item = self.table.item(line_index, 0)
+        if row_item and row_item.text():
+            line_name = row_item.text()
+
+        else:
+            # Fallback to spectrum type (UV or optical)
+            is_optical = self.coadded_spectrum.get('is_optical', False)
+            line_labels = self.optical_line_labels if is_optical else self.line_labels
+            line_name = line_labels[line_index]
+        self.statusBar().showMessage(f'Select left continuum start for {line_name}')
 
         # Clear previous selections from the plot
         self.clear_selection_overlays()
@@ -3056,7 +3424,6 @@ class SpectralFluxApp(QMainWindow):
         # Connect event handler
         if self.cid is None:
             self.cid = self.canvas.mpl_connect('button_press_event', self.on_click)
-
     def clear_selection_overlays(self):
         # Remove existing lines and patches
         try:

@@ -15,7 +15,7 @@ from matplotlib.figure import Figure
 from astropy.table import Table, vstack
 from astropy.io import fits
 from prepare_spec import prepare, prepare_other_grating, combine_tables, coadd
-
+import extinction
 class CoadderThread(QThread):
     progress_updated = pyqtSignal(int)
     finished_signal = pyqtSignal(object)
@@ -193,6 +193,7 @@ class SpectraCoadderApp(QMainWindow):
         
         self.file_data = []  # Store (file_path, grating_type) tuples
         self.coadded_spectrum = None
+        self.a_v = None
         
         self.initUI()
         
@@ -281,6 +282,10 @@ class SpectraCoadderApp(QMainWindow):
         self.redshift_input = QLineEdit("0.0")
         param_layout.addWidget(self.redshift_input, 1, 1)
         
+        param_layout.addWidget(QLabel("A_V:"), 2, 0)
+        self.a_v_input = QLineEdit("0.0")
+        param_layout.addWidget(self.a_v_input, 2, 1)
+
         param_group.setLayout(param_layout)
         parent_layout.addWidget(param_group)
         
@@ -290,6 +295,11 @@ class SpectraCoadderApp(QMainWindow):
         self.coadd_btn = QPushButton("Coadd Spectra")
         self.coadd_btn.clicked.connect(self.startCoadding)
         actions_layout.addWidget(self.coadd_btn)
+
+        self.extinction_btn = QPushButton("Extinction Correction")
+        self.extinction_btn.clicked.connect(self.extinctionCorrection)
+        self.extinction_btn.setEnabled(False)
+        actions_layout.addWidget(self.extinction_btn)
         
         self.save_fits_btn = QPushButton("Save as FITS")
         self.save_fits_btn.clicked.connect(lambda: self.saveSpectrum('fits'))
@@ -401,6 +411,20 @@ class SpectraCoadderApp(QMainWindow):
                         except ValueError:
                             # If first line isn't a redshift number, treat it as file info
                             rows = [first_line] + list(reader)
+                    if len(first_line) == 2:
+                        # if first line has two columns, first is redshift and second is a_v
+                        try:
+                            redshift = float(first_line[0])
+                            self.redshift_input.setText(str(redshift))
+                            a_v = float(first_line[1])
+                            self.a_v = a_v
+                            self.a_v_input.setText(str(a_v))
+                            # Skip to next line which should have file info
+                            first_file_line = next(reader)
+                            rows = [first_file_line] + list(reader)
+                        except ValueError:
+                            # If first line isn't a redshift number, treat it as file info
+                            rows = [first_line] + list(reader)
                     else:
                         #jj mplconnect
                         # First line has multiple columns, treat as file info
@@ -506,6 +530,7 @@ class SpectraCoadderApp(QMainWindow):
         self.coadded_spectrum = coadded_spectrum
         self.statusBar().showMessage('Coadding complete')
         
+        self.extinction_btn.setEnabled(True)
         # Plot the result
         self.plotCoaddedSpectrum()
         
@@ -517,6 +542,19 @@ class SpectraCoadderApp(QMainWindow):
         self.statusBar().showMessage('Error during coadding')
         QMessageBox.critical(self, "Error", error_message)
         self.progress_bar.setValue(0)
+
+    def extinctionCorrection(self):
+        if self.coadded_spectrum is None:
+            QMessageBox.warning(self, "No Data", "No coadded spectrum to correct.")
+            return
+            
+        else:
+            extinction_array = extinction.fitzpatrick99(self.coadded_spectrum['wave'].astype(np.float64), self.a_v)
+            new_flux = extinction.remove(extinction_array, self.coadded_spectrum['flux'])
+            self.coadded_spectrum['flux'] = new_flux
+            self.plotCoaddedSpectrum()
+            self.statusBar().showMessage('Coadding complete')
+        # QMessageBox.information(self, "Extinction Correction", "Extinction correction applied (placeholder).")
         
     def plotCoaddedSpectrum(self):
         if self.coadded_spectrum is None:
