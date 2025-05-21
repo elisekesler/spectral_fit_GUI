@@ -553,7 +553,8 @@ class SpectraCoadderApp(QMainWindow):
             new_flux = extinction.remove(extinction_array, self.coadded_spectrum['flux'])
             self.coadded_spectrum['flux'] = new_flux
             self.plotCoaddedSpectrum()
-            self.statusBar().showMessage('Coadding complete')
+            self.statusBar().showMessage('Extinction correction complete')
+            self.extinction_btn.setEnabled(False)
         # QMessageBox.information(self, "Extinction Correction", "Extinction correction applied (placeholder).")
         
     def plotCoaddedSpectrum(self):
