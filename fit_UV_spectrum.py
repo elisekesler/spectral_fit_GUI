@@ -445,10 +445,10 @@ class SpectralFluxApp(QMainWindow):
 
 
         # Save Spectrum button
-        self.save_button = QPushButton('Save Spectrum')
-        self.save_button.clicked.connect(self.save_spectrum)
-        self.save_button.setMinimumWidth(150)
-        self.controls_layout.addWidget(self.save_button)
+        # self.save_button = QPushButton('Save Spectrum')
+        # self.save_button.clicked.connect(self.save_spectrum)
+        # self.save_button.setMinimumWidth(150)
+        # self.controls_layout.addWidget(self.save_button)
 
         # Load Spectrum button
         self.load_spectrum_button = QPushButton('Load Spectrum')
@@ -552,7 +552,10 @@ class SpectralFluxApp(QMainWindow):
                 # Update the display label
                 self.selected_line_display.setText(line_label)
                 # Find the matching index in line_labels (add 1 because we skip 'Full Spectrum')
-                self.current_line = self.line_labels.index(line_label)
+                try:
+                    self.current_line = self.line_labels.index(line_label)
+                except ValueError:
+                    self.current_line = self.optical_line_labels.index(line_label)
                 # Enable the action buttons
                 self.update_button_states(True)
 
@@ -1405,6 +1408,8 @@ class SpectralFluxApp(QMainWindow):
     def on_flux_method_changed(self, index):
         selected_method = self.flux_method_dropdown.currentText()
         
+        self.clear_method_controls()
+
         if selected_method == "Direct Integration":
             self.create_direct_integration_controls()
         elif selected_method == "Gaussian Fit":
@@ -1574,11 +1579,14 @@ class SpectralFluxApp(QMainWindow):
         entry_layout.addWidget(view_params_button)
         
         # Remove the stretch from the end of line_entries_layout
-        if self.line_entries_layout.count() > 0:
-            item = self.line_entries_layout.itemAt(self.line_entries_layout.count() - 1)
-            if item and item.spacerItem():
-                self.line_entries_layout.removeItem(item)
-        
+        try:
+            if self.line_entries_layout.count() > 0:
+                item = self.line_entries_layout.itemAt(self.line_entries_layout.count() - 1)
+                if item and item.spacerItem():
+                    self.line_entries_layout.removeItem(item)
+        except Exception as e:
+            print(f"Error removing stretch: {e}")
+            
         # Add the line entry
         self.line_entries_layout.addWidget(line_entry)
         self.line_entries_layout.addStretch()
@@ -2918,7 +2926,8 @@ class SpectralFluxApp(QMainWindow):
     def clear_line_entries(self):
         if not hasattr(self, 'line_entries_layout'):
             return
-        if hasattr(self, 'line_entries_layout'):
+        
+        try:
             while self.line_entries_layout.count():
                 item = self.line_entries_layout.takeAt(0)
                 if item.widget():
@@ -2928,41 +2937,66 @@ class SpectralFluxApp(QMainWindow):
             
             # Add back the stretch
             self.line_entries_layout.addStretch()
+        except RuntimeError:
+            # Layout has been deleted, do nothing
+            pass
+        # if hasattr(self, 'line_entries_layout'):
+        #     while self.line_entries_layout.count():
+        #         item = self.line_entries_layout.takeAt(0)
+        #         if item.widget():
+        #             item.widget().deleteLater()
+        #         elif item.spacerItem():
+        #             self.line_entries_layout.removeItem(item)
+            
+        #     # Add back the stretch
+        #     self.line_entries_layout.addStretch()
 
     def clear_method_controls(self):
         # Clear the line entries if we're switching from Gaussian fit mode
-        if hasattr(self, 'line_entries_layout'):
-            self.clear_line_entries()
-        
-        # Remove all widgets from the method layout
-        while self.method_layout.count():
-            item = self.method_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-            elif item.layout():
-                # Recursively clear layouts
-                while item.layout().count():
-                    child = item.layout().takeAt(0)
-                    if child.widget():
-                        child.widget().deleteLater()
-    def save_spectrum(self):
-        if self.coadded_spectrum is None:
-            self.statusBar().showMessage('No co-added spectrum to reference.')
-            return
-
-        # Get the save file path
-        options = QFileDialog.Options()
-        save_file, _ = QFileDialog.getSaveFileName(
-            self, "Select Reference Path for Spectrum", "", "FITS Files (*.fits);;NPZ Files (*.npz);;All Files (*)", options=options
-        )
-
-        if save_file:
+        if hasattr(self, 'line_entries_layout') and self.line_entries_layout is not None:
             try:
-                # Update the objects table with the saved spectrum reference path
-                self.update_objects_table_with_spectrum_path(save_file)
-                self.statusBar().showMessage(f'Spectrum path recorded: {save_file}')
-            except Exception as e:
-                self.statusBar().showMessage(f'Error recording spectrum path: {e}')
+                self.clear_line_entries()
+            except RuntimeError:
+                # Layout may have been deleted already
+                pass
+            
+        # Remove all widgets from the method layout
+        try:
+            while self.method_layout.count():
+                item = self.method_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+                elif item.layout():
+                    # Recursively clear layouts
+                    while item.layout().count():
+                        child = item.layout().takeAt(0)
+                        if child.widget():
+                            child.widget().deleteLater()
+        except RuntimeError:
+            # Layout may have been deleted already
+            pass
+            
+        # Reset references to deleted layouts
+        if hasattr(self, 'line_entries_layout'):
+            self.line_entries_layout = None
+    # def save_spectrum(self):
+    #     if self.coadded_spectrum is None:
+    #         self.statusBar().showMessage('No co-added spectrum to reference.')
+    #         return
+
+        # # Get the save file path
+        # options = QFileDialog.Options()
+        # save_file, _ = QFileDialog.getSaveFileName(
+        #     self, "Select Reference Path for Spectrum", "", "FITS Files (*.fits);;NPZ Files (*.npz);;All Files (*)", options=options
+        # )
+
+        # if save_file:
+        #     try:
+        #         # Update the objects table with the saved spectrum reference path
+        #         self.update_objects_table_with_spectrum_path(save_file)
+        #         self.statusBar().showMessage(f'Spectrum path recorded: {save_file}')
+        #     except Exception as e:
+        #         self.statusBar().showMessage(f'Error recording spectrum path: {e}')
 
     def update_objects_table_with_spectrum_path(self, fits_path):
         """Update the objects table with the path to the spectrum"""
@@ -3290,6 +3324,10 @@ class SpectralFluxApp(QMainWindow):
             except Exception:
                 print(f'no axis defined yet/no lines to remove')
             self.figure.clear()
+            # if self.ax is not None:
+            #     self.ax.clear()
+            #     while self.ax.lines:
+            #         ax.lines[0].remove()
             self.ax = self.figure.add_subplot(111)
             ax = self.ax
             ax.plot(wave, flux,  color='black', drawstyle='steps-mid')
@@ -3408,14 +3446,15 @@ class SpectralFluxApp(QMainWindow):
         
         # Use appropriate line labels based on current spectrum type
         row_item = self.table.item(line_index, 0)
-        if row_item and row_item.text():
-            line_name = row_item.text()
-
-        else:
+        # if row_item and row_item.text():
+        #     # line_name = row_item.text()
+        #     line_labels = self.line_labels
+        #     line_name = line_labels[line_index]
+        # else:
             # Fallback to spectrum type (UV or optical)
-            is_optical = self.coadded_spectrum.get('is_optical', False)
-            line_labels = self.optical_line_labels if is_optical else self.line_labels
-            line_name = line_labels[line_index]
+        is_optical = self.coadded_spectrum.get('is_optical', False)
+        line_labels = self.optical_line_labels if is_optical else self.line_labels
+        line_name = line_labels[line_index]
         self.statusBar().showMessage(f'Select left continuum start for {line_name}')
 
         # Clear previous selections from the plot
