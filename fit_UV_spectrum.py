@@ -24,6 +24,8 @@ from gaussian_fitfunctions import SpectralRegion
 from matplotlib.figure import Figure
 from prepare_spec import coadd, prepare, prepare_other_grating, combine_tables
 import pickle
+from line_definitions import UV_LINES, OPTICAL_LINES, ALL_LINES, LINE_MAP
+        
 
 class GaussianWindow(QWidget):
     """
@@ -426,6 +428,7 @@ class SpectralFluxApp(QMainWindow):
             self.plot_optical_spectrum()
             self.statusBar().showMessage(f'Optical spectrum loaded from {optical_fits_path}')
             
+            self.load_line_preset("optical")
         except Exception as e:
             self.statusBar().showMessage(f'Error loading optical spectrum: {e}')
             print(f"Error details: {str(e)}")
@@ -491,8 +494,12 @@ class SpectralFluxApp(QMainWindow):
         self.controls_layout.addWidget(self.surrounding_label)
 
         self.line_dropdown = QComboBox(self)
-        self.line_dropdown.addItems(self.line_labels)
+        self.line_dropdown.addItem("Full Spectrum")
+        for line_def in ALL_LINES:
+            self.line_dropdown.addItem(line_def.name)
+        
         self.line_dropdown.currentIndexChanged.connect(self.zoom_to_line)
+
         self.controls_layout.addWidget(self.line_dropdown)
 
         # Progress bar
@@ -514,21 +521,13 @@ class SpectralFluxApp(QMainWindow):
             'Continuum Slope', 'Continuum Intercept',
             'Gaussian Fit File'
         ])
-        self.table.setRowCount(len(self.line_labels) - 1)  # Skip 'Full Spectrum'
+        self.table.setRowCount(len(ALL_LINES))  # Skip 'Full Spectrum'
 
         # Populate the table
-        for i, line_label in enumerate(self.line_labels[1:]):
-            self.table.setItem(i, 0, QTableWidgetItem(line_label))
-            self.table.setItem(i, 1, QTableWidgetItem(''))
-            self.table.setItem(i, 2, QTableWidgetItem(''))
-            self.table.setItem(i, 3, QTableWidgetItem(''))  # Left lower bound
-            self.table.setItem(i, 4, QTableWidgetItem(''))  # Left upper bound
-            self.table.setItem(i, 5, QTableWidgetItem(''))  # Right lower bound
-            self.table.setItem(i, 6, QTableWidgetItem(''))  # Right upper bound
-            self.table.setItem(i, 7, QTableWidgetItem(''))  # Continuum Slope
-            self.table.setItem(i, 8, QTableWidgetItem(''))  # Continuum Intercept
-            self.table.setItem(i, 9, QTableWidgetItem(''))  # Gaussian fit file (if applicable)
-
+        for i, line_def in enumerate(ALL_LINES):
+            self.table.setItem(i, 0, QTableWidgetItem(line_def.name))
+            for j in range(1, 10):
+                self.table.setItem(i, j, QTableWidgetItem(''))
         self.main_layout.addWidget(self.table)
         self.table.resizeColumnsToContents()
         header = self.table.horizontalHeader()
@@ -879,7 +878,19 @@ class SpectralFluxApp(QMainWindow):
             self.statusBar().showMessage(f"Updated left table from CSV: {csv_path}")
         except Exception as e:
             self.statusBar().showMessage(f"Error reading object CSV: {str(e)}")
-
+    def setup_line_column_mapping(self):
+        """Build line-to-column mapping for the objects table"""
+        from line_definitions import ALL_LINES
+        
+        # Start after the base columns
+        starting_col = 4  # After Object Name, Object_csv, Object_fits, Optical_fits
+        
+        # Create the mapping
+        self.line_column_map = {}
+        for i, line_def in enumerate(ALL_LINES):
+            # Map line name to its flux column
+            flux_col = starting_col + (i * 2)  # Flux and error columns for each line
+            self.line_column_map[line_def.name] = flux_col
     def init_gaussian_fit_mode(self):
             """Initialize variables needed for Gaussian fit mode"""
             # Create internal storage directory if it doesn't exist
@@ -978,16 +989,80 @@ class SpectralFluxApp(QMainWindow):
 
     def undo_continuum_on_selected_line(self):
         self.undo_continuum_for_line(self.current_line)
+    def load_line_preset(self, category="UV"):
+        """Load a preset of spectral lines based on category"""
+        # Clear existing lines
+        self.clear_all_lines()
+        
+        # Choose the appropriate preset
+        if category.lower() == "uv":
+            lines_to_load = UV_LINES
+        elif category.lower() == "optical":
+            lines_to_load = OPTICAL_LINES
+        elif category.lower() == "all":
+            lines_to_load = ALL_LINES
+        else:
+            return
+        
+        # Add lines to the left table
+        for line_def in lines_to_load:
+            # If line already in table, skip
+            line_exists = False
+            for row in range(self.table.rowCount()):
+                if self.table.item(row, 0) and self.table.item(row, 0).text() == line_def.name:
+                    line_exists = True
+                    break
+            
+            if not line_exists:
+                self.add_line_from_definition(line_def)
 
+    def add_line_from_definition(self, line_def):
+        """Add a line to the table based on a LineDefinition"""
+        row = self.add_optical_line_row(line_def.name)
+        
+        # When in Gaussian fit mode, also add to spectral lines
+        if self.flux_method_dropdown.currentText() == "Gaussian Fit":
+            # Create doublet info if needed
+            doublet_info = None
+            if line_def.is_doublet:
+                doublet_info = {
+                    "secondary_wavelength": line_def.secondary_wavelength,
+                    "ratio": line_def.doublet_ratio
+                }
+            
+            # Add the line to spectral lines
+            self.create_spectral_line_entry(
+                line_def.name,
+                line_def.rest_wavelength,
+                doublet_info,
+                False  # Not geocoronal
+            )
+        
+        # Update tables and CSVs
+        selected_rows = self.objects_table.selectionModel().selectedRows()
+        if selected_rows:
+            row_index = selected_rows[0].row()
+            self.update_object_row_from_line_values(row_index)
+            self.update_object_csv_from_left_table(row_index)
     def create_right_panel(self):
         # Create a table for object data
         self.objects_table = QTableWidget()
-        self.objects_table.setColumnCount(12)
-        self.objects_table.setHorizontalHeaderLabels([
-            "Object Name", "Lya", "Lya_err", "OVI", "OVI_err", 
-            "CIV", "CIV_err", "NV", "NV_err", "Object_csv", "Object_fits", "Optical_fits"
-        ])
+        # self.objects_table.setColumnCount(12)
+
+        headers = ["Object Name", "Object_csv", "Object_fits", "Optical_fits"]
+
+        for line_def in ALL_LINES:
+            headers.append(f"{line_def.name}")
+            headers.append(f"{line_def.name}_err")
+
+        self.objects_table.setColumnCount(len(headers))
+        self.objects_table.setHorizontalHeaderLabels(headers)
+        # self.objects_table.setHorizontalHeaderLabels([
+        #     "Object Name", "Lya", "Lya_err", "OVI", "OVI_err", 
+        #     "CIV", "CIV_err", "NV", "NV_err", "Object_csv", "Object_fits", "Optical_fits"
+        # ])
         
+        # self.ensure_optical_columns_exist()
         # Make the table take up most of the right panel
         self.right_layout.addWidget(self.objects_table)
         
@@ -1305,6 +1380,11 @@ class SpectralFluxApp(QMainWindow):
                 
                 # Add the new line to the table
                 new_row = self.add_optical_line_row(line_name)
+
+                selected_rows = self.objects_table.selectionModel().selectedRows()
+                if selected_rows:
+                    row_index = selected_rows[0].row()
+                    self.update_object_csv_from_left_table(row_index)
                 self.statusBar().showMessage(f"Added line '{line_name}' to the table")
     def save_objects_csv(self):
         options = QFileDialog.Options()
@@ -1387,6 +1467,11 @@ class SpectralFluxApp(QMainWindow):
         # Make sure table is properly sized
         self.table.resizeColumnsToContents()
         
+        selected_rows = self.objects_table.selectionModel().selectedRows()
+        if selected_rows:
+            row_index = selected_rows[0].row()
+            self.update_object_row_from_line_values(row_index)
+            self.update_object_csv_from_left_table(row_index)
         return current_row_count
     def update_redshift(self):
         try:
@@ -2316,16 +2401,22 @@ class SpectralFluxApp(QMainWindow):
         self.canvas.draw()
 
     def clear_fit_result_plot(self):
-        for line in self.ax.lines:
-            x_data = line.get_xdata()
-            y_data = line.get_ydata()
-            for existing_line in self.all_plotted_models:
-                existing_x = existing_line.get_xdata()
-                existing_y = existing_line.get_ydata()
-                if np.array_equal(x_data, existing_x) and np.array_equal(y_data, existing_y):
+        for plotted_model in self.all_plotted_models:
+            for line in plotted_model:
+                if line in self.ax.lines:
                     print(f"Removing line: {line}")
                     line.remove()
         self.all_plotted_models = []
+        # for line in self.ax.lines:
+        #     x_data = line.get_xdata()
+        #     y_data = line.get_ydata()
+        #     for existing_line in self.all_plotted_models:
+        #         existing_x = existing_line.get_xdata()
+        #         existing_y = existing_line.get_ydata()
+        #         if np.array_equal(x_data, existing_x) and np.array_equal(y_data, existing_y):
+        #             print(f"Removing line: {line}")
+        #             line.remove()
+        # self.all_plotted_models = []
             
     def fit_gaussian_model(self):
         """Perform fitting using the JointSpectralFitter class"""
@@ -2403,15 +2494,18 @@ class SpectralFluxApp(QMainWindow):
             print(f"Lines in plot range: {', '.join(lines_in_range)}")
         
         print("\n=== Creating Spectral Region ===")
+        included_lines = [line for line in self.spectral_lines if line.include_in_fit]
         # Create a single region with all lines
         try:
-            from gaussian_fitfunctions import SpectralRegion
             region = SpectralRegion(
                 wave_min=x_min,
                 wave_max=x_max,
-                lines=self.spectral_lines
+                lines=included_lines,
             )
             print(f"Created SpectralRegion with range: {region.wave_min:.2f} - {region.wave_max:.2f} Å")
+            print("\n=== Lines included in fit ===")
+            for i,line in enumerate(self.spectral_lines):
+                print(f"Line {i+1}: {line.name} - Include in fit: {line.include_in_fit}")
         except Exception as e:
             print(f"Error creating SpectralRegion: {str(e)}")
             import traceback
@@ -2722,8 +2816,8 @@ class SpectralFluxApp(QMainWindow):
         entry_layout.addWidget(view_params_button)
 
         include_line_button = QCheckBox("Include in Fit?")
-        include_line_button.setChecked(True)
-        include_line_button.stateChanged.connect(lambda state: spectral_line.set_include_in_fit(state))
+        include_line_button.setChecked(spectral_line.include_in_fit)
+        include_line_button.stateChanged.connect(lambda state, line=spectral_line: line.set_include_in_fit(bool(state)))
         entry_layout.addWidget(include_line_button)
         
         
@@ -2745,50 +2839,49 @@ class SpectralFluxApp(QMainWindow):
         # Create directory for internal storage if it doesn't exist
         os.makedirs("internal", exist_ok=True)
         print(f'ADD GAUSSIAN LINE FUNCTION')
-        
-        # Define common spectral lines with their properties
-        predefined_lines = {
-            "Lya": {
-                "wavelength": 1215.67,
-                "is_doublet": False
-            },
-            "NV": {
-                "wavelength": 1238.82,
-                "is_doublet": True,
-                "secondary_wavelength": 1242.80,
-                "ratio": 2.95,
-                "ratio_varies": True
-            },
-            "SiIV": {
-                "wavelength": 1393.75,
-                "is_doublet": True,
-                "secondary_wavelength": 1402.77,
-                "ratio": 2.95
-            },
-            "CIV": {
-                "wavelength": 1548.19,
-                "is_doublet": True,
-                "secondary_wavelength": 1550.77,
-                "ratio": 2.95,
-                "ratio_varies": True
-            },
-            "OVI": {
-                "wavelength": 1031.92,
-                "is_doublet": True,
-                "secondary_wavelength": 1037.61,
-                "ratio": 2.95,
-                "ratio_varies": True
-            },
-            "HeII": {
-                "wavelength": 1640.42,
-                "is_doublet": False
-            },
-            "geocoronal_Lya": {
-                "wavelength": 1215.67,
-                "is_doublet": False,
-                "geocoronal": True
-            }
-        }
+        # # Define common spectral lines with their properties
+        # predefined_lines = {
+        #     "Lya": {
+        #         "wavelength": 1215.67,
+        #         "is_doublet": False
+        #     },
+        #     "NV": {
+        #         "wavelength": 1238.82,
+        #         "is_doublet": True,
+        #         "secondary_wavelength": 1242.80,
+        #         "ratio": 2.95,
+        #         "ratio_varies": True
+        #     },
+        #     "SiIV": {
+        #         "wavelength": 1393.75,
+        #         "is_doublet": True,
+        #         "secondary_wavelength": 1402.77,
+        #         "ratio": 2.95
+        #     },
+        #     "CIV": {
+        #         "wavelength": 1548.19,
+        #         "is_doublet": True,
+        #         "secondary_wavelength": 1550.77,
+        #         "ratio": 2.95,
+        #         "ratio_varies": True
+        #     },
+        #     "OVI": {
+        #         "wavelength": 1031.92,
+        #         "is_doublet": True,
+        #         "secondary_wavelength": 1037.61,
+        #         "ratio": 2.95,
+        #         "ratio_varies": True
+        #     },
+        #     "HeII": {
+        #         "wavelength": 1640.42,
+        #         "is_doublet": False
+        #     },
+        #     "geocoronal_Lya": {
+        #         "wavelength": 1215.67,
+        #         "is_doublet": False,
+        #         "geocoronal": True
+        #     }
+        # }
         
         # Create the dialog
         dialog = QDialog(self)
@@ -2815,8 +2908,18 @@ class SpectralFluxApp(QMainWindow):
         
         # Predefined lines form
         line_dropdown = QComboBox()
-        line_dropdown.addItems(list(predefined_lines.keys()))
-        line_dropdown.currentIndexChanged.connect(lambda: update_line_details(line_dropdown.currentText()))
+        line_dropdown.addItems([line.name for line in ALL_LINES])
+        line_dropdown.currentIndexChanged.connect(update_line_details(line_dropdown.currentText()))
+
+        def update_line_details(line_name):
+            from line_definitions import LINE_MAP
+            if line_name in LINE_MAP:
+                line_def = LINE_MAP[line_name]
+                is_doublet.setChecked(line_def.is_doublet)
+                
+                if line_def.is_doublet:
+                    secondary_wavelength.setValue(line_def.secondary_wavelength)
+                    ratio_input.setValue(line_def.doublet_ratio)
         predefined_form.addRow("Select Line:", line_dropdown)
         
         # Custom line form
@@ -2924,7 +3027,7 @@ class SpectralFluxApp(QMainWindow):
             # Save to CSV
             self.save_spectral_lines()
     def clear_line_entries(self):
-        if not hasattr(self, 'line_entries_layout'):
+        if not hasattr(self, 'line_entries_layout') or self.line_entries_layout is None:
             return
         
         try:
@@ -3049,6 +3152,7 @@ class SpectralFluxApp(QMainWindow):
 
     def update_object_row_from_line_values(self, row_index):
         """Update the flux values in the objects table from the left table with doublet summing"""
+        print(f'Updating object row {row_index} from line values')
         # Dictionary to track doublet components for summing
         doublet_sums = {
             "Lya": {"flux": 0.0, "error": 0.0, "count": 0},
@@ -3068,7 +3172,11 @@ class SpectralFluxApp(QMainWindow):
             "Si 1393": "Si",
             "Si 1402": "Si",
             "C IV 1548": "CIV",
-            "C IV 1550": "CIV"
+            "C IV 1550": "CIV",
+            "Ha": "Ha",
+            "Hb": "Hb",
+            "[OIII] 4958": "OIII",
+            "[OIII] 5006": "OIII",
         }
     
         # Mapping from doublet categories to object table columns
@@ -3077,7 +3185,11 @@ class SpectralFluxApp(QMainWindow):
             "OVI": (3, 4),
             "NV": (7, 8),
             "CIV": (5, 6),
-            "Si": None        # Not included in right table, can be added if needed
+            "Si": None,        # Not included in right table, can be added if needed
+            "Ha": (12, 13),
+            "Hb": (14, 15),
+            "OIII": (16, 17),
+
         }
     
         # Process each row in the left table
@@ -3128,8 +3240,22 @@ class SpectralFluxApp(QMainWindow):
                 # Update the values in the objects table
                 self.objects_table.setItem(row_index, flux_col, QTableWidgetItem(f"{flux_value:.2e}"))
                 self.objects_table.setItem(row_index, error_col, QTableWidgetItem(f"{error_value:.2e}"))
-        
-
+        # Add debugging to see final values
+        for doublet, sum_data in doublet_sums.items():
+            if sum_data["count"] > 0 and doublet_to_columns.get(doublet):
+                flux_col, error_col = doublet_to_columns[doublet]
+                print(f"  {doublet}: Flux={sum_data['flux']:.2e}, Count={sum_data['count']}")
+    def ensure_optical_columns_exist(self):
+        # Check if optical columns exist, add them if needed
+        current_column_count = self.objects_table.columnCount()
+        if current_column_count < 18:  # Assuming columns 12-17 are for optical lines
+            # Add the needed columns
+            self.objects_table.setColumnCount(18)
+            self.objects_table.setHorizontalHeaderLabels([
+                "Object Name", "Lya", "Lya_err", "OVI", "OVI_err", 
+                "CIV", "CIV_err", "NV", "NV_err", "Object_csv", "Object_fits", "Optical_fits",
+                "Ha", "Ha_err", "Hb", "Hb_err", "OIII", "OIII_err"
+            ])
     def load_spectrum(self):
         # Get the load file path
         options = QFileDialog.Options()
@@ -3357,6 +3483,7 @@ class SpectralFluxApp(QMainWindow):
             self.line_dropdown.setCurrentIndex(current_index if current_index < len(self.line_labels) else 0)
             
             self.statusBar().showMessage('Returned to UV spectrum')
+            self.load_line_preset("uv")
         else:
             self.statusBar().showMessage('No UV spectrum available')
     def clear_all_lines(self):
@@ -3390,19 +3517,13 @@ class SpectralFluxApp(QMainWindow):
             is_optical = self.coadded_spectrum.get('is_optical', False)
             
             # Use the appropriate line wavelengths based on spectrum type
-            if is_optical:
-                rest_frame_wavelength = self.optical_line_wavelengths[selected_line] * (1 + self.redshift)
-                line_labels = self.optical_line_labels
-            else:
-                rest_frame_wavelength = self.line_wavelengths[selected_line] * (1 + self.redshift)
-                line_labels = self.line_labels
             
             wave = self.coadded_spectrum['wave']
             flux = self.coadded_spectrum['flux']
             error_up = self.coadded_spectrum['error_up']
             error_down = self.coadded_spectrum['error_down']
 
-            if line_labels[selected_line] == 'Full Spectrum':
+            if selected_line == 'Full Spectrum':
                 # Plot the full spectrum
                 ax = self.ax
                 ax.plot(wave, flux, color='black', drawstyle='steps-mid')
@@ -3418,26 +3539,29 @@ class SpectralFluxApp(QMainWindow):
                     
                 self.canvas.draw()
             else:
-                zoom_range = (rest_frame_wavelength - 50, rest_frame_wavelength + 50)
-                mask = (wave >= zoom_range[0]) & (wave <= zoom_range[1])
-                wave_zoom = wave[mask]
-                flux_zoom = flux[mask]
+                if selected_line in LINE_MAP:
+                    line_def = LINE_MAP[selected_line]
+                    rest_frame_wavelength = line_def.rest_wavelength * (1 + self.redshift)
+                    zoom_range = (rest_frame_wavelength - 50, rest_frame_wavelength + 50)
+                    mask = (wave >= zoom_range[0]) & (wave <= zoom_range[1])
+                    wave_zoom = wave[mask]
+                    flux_zoom = flux[mask]
 
-                ax = self.ax
-                ax.plot(wave, flux, color='black', drawstyle='steps-mid')
-                ax.plot(wave, (error_up + error_down)/2, color='grey', drawstyle='steps-mid')
-                ax.set_xlim(zoom_range)
-                ax.set_ylim(0, np.max(flux_zoom[~np.isnan(flux_zoom)]) * 1.1)
-                ax.set_xlabel('Wavelength')
-                ax.set_ylabel(f'Flux (erg / s / cm^2 / A ) (scaled by {self.scale_value:0.2e})')
-                
-                # Plot appropriate line markers based on spectrum type
-                if is_optical:
-                    self.plot_expected_optical_lines(ax)
-                else:
-                    self.plot_expected_lines(ax)
+                    ax = self.ax
+                    ax.plot(wave, flux, color='black', drawstyle='steps-mid')
+                    ax.plot(wave, (error_up + error_down)/2, color='grey', drawstyle='steps-mid')
+                    ax.set_xlim(zoom_range)
+                    ax.set_ylim(0, np.max(flux_zoom[~np.isnan(flux_zoom)]) * 1.1)
+                    ax.set_xlabel('Wavelength')
+                    ax.set_ylabel(f'Flux (erg / s / cm^2 / A ) (scaled by {self.scale_value:0.2e})')
                     
-                self.canvas.draw()
+                    # Plot appropriate line markers based on spectrum type
+                    if is_optical:
+                        self.plot_expected_optical_lines(ax)
+                    else:
+                        self.plot_expected_lines(ax)
+                        
+                    self.canvas.draw()
         else:
             self.statusBar().showMessage('No spectrum to zoom into')
     def find_flux_for_line(self, line_index):
