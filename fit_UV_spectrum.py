@@ -381,7 +381,7 @@ class SpectralFluxApp(QMainWindow):
         row_index = selected_rows[0].row()
         
         # Get the optical fits path from column 11 (Optical_fits)
-        optical_fits_item = self.objects_table.item(row_index, 11)
+        optical_fits_item = self.objects_table.item(row_index, 3)
         if not optical_fits_item or not optical_fits_item.text():
             # If empty, ask user to select a file
             options = QFileDialog.Options()
@@ -551,10 +551,11 @@ class SpectralFluxApp(QMainWindow):
                 # Update the display label
                 self.selected_line_display.setText(line_label)
                 # Find the matching index in line_labels (add 1 because we skip 'Full Spectrum')
-                try:
-                    self.current_line = self.line_labels.index(line_label)
-                except ValueError:
-                    self.current_line = self.optical_line_labels.index(line_label)
+                if line_label in LINE_MAP:
+                    # Use the table row index directly
+                    self.current_line = row_index + 1  # +1 to account for 'Full Spectrum' offset
+                else:
+                    self.current_line = 0  # Default fallback
                 # Enable the action buttons
                 self.update_button_states(True)
 
@@ -594,10 +595,12 @@ class SpectralFluxApp(QMainWindow):
             self.update_line_values_from_object_csv(row_index)
         
         # Update the object_csv cell in the right table
-        self.objects_table.setItem(row_index, 9, QTableWidgetItem(csv_path))
+        self.objects_table.setItem(row_index, 1, QTableWidgetItem(csv_path))
         
+        self.current_object_row = row_index
+        self.current_object_csv = csv_path
         # Get the fits file path from column 10 (Object_fits)
-        fits_item = self.objects_table.item(row_index, 10)
+        fits_item = self.objects_table.item(row_index, 2)
         if hasattr(self, 'spectral_lines') and self.spectral_lines:
             self.save_spectral_lines()
         if hasattr(self, 'component_parameters') and self.component_parameters:
@@ -750,10 +753,22 @@ class SpectralFluxApp(QMainWindow):
             self.statusBar().showMessage(f"Error reading line measurements from CSV: {str(e)}")
             import traceback
             print(traceback.format_exc())
+
+    def auto_save_current_object(self):
+        """Auto-save current object's measurements to CSV"""
+        if hasattr(self, 'current_object_row') and hasattr(self, 'current_object_csv'):
+            try:
+                self.update_object_row_from_line_values(self.current_object_row)
+                self.update_object_csv_from_left_table(self.current_object_row)
+                # Optional: Brief status update
+                object_name = self.objects_table.item(self.current_object_row, 0).text()
+                self.statusBar().showMessage(f"Auto-saved measurements for {object_name}", 2000)
+            except Exception as e:
+                print(f"Auto-save failed: {e}")
     def update_object_csv_from_left_table(self, row_index):
         """Update the individual object CSV file with data from the left table"""
         # Get the object CSV path
-        csv_item = self.objects_table.item(row_index, 9)
+        csv_item = self.objects_table.item(row_index, 1)
         if not csv_item or not csv_item.text():
             return
             
@@ -1057,6 +1072,7 @@ class SpectralFluxApp(QMainWindow):
 
         self.objects_table.setColumnCount(len(headers))
         self.objects_table.setHorizontalHeaderLabels(headers)
+        self.setup_line_column_mapping()
         # self.objects_table.setHorizontalHeaderLabels([
         #     "Object Name", "Lya", "Lya_err", "OVI", "OVI_err", 
         #     "CIV", "CIV_err", "NV", "NV_err", "Object_csv", "Object_fits", "Optical_fits"
@@ -1678,6 +1694,9 @@ class SpectralFluxApp(QMainWindow):
         
         # Enable the fit button if we have at least one line
         self.fit_model_button.setEnabled(True)
+
+        self.save_spectral_lines()
+        self.refresh_line_entries()
         
         return spectral_line
 
@@ -2368,7 +2387,7 @@ class SpectralFluxApp(QMainWindow):
                 self.all_plotted_models.append(plotted)
                 legend_labels.append(f"{comp_name}")
                 legend_handles.append(plotted[0])
-            continuum_model = self.ax.plot(region_wave, region_data['continuum'], 'k--', color='gray', alpha = 0.7)
+            continuum_model = self.ax.plot(region_wave, region_data['continuum'], '--', color='gray', alpha = 0.7)
             self.all_plotted_models.append(continuum_model)
             legend_labels.append("Continuum")
             legend_handles.append(continuum_model[0])
@@ -2909,7 +2928,6 @@ class SpectralFluxApp(QMainWindow):
         # Predefined lines form
         line_dropdown = QComboBox()
         line_dropdown.addItems([line.name for line in ALL_LINES])
-        line_dropdown.currentIndexChanged.connect(update_line_details(line_dropdown.currentText()))
 
         def update_line_details(line_name):
             from line_definitions import LINE_MAP
@@ -2920,8 +2938,11 @@ class SpectralFluxApp(QMainWindow):
                 if line_def.is_doublet:
                     secondary_wavelength.setValue(line_def.secondary_wavelength)
                     ratio_input.setValue(line_def.doublet_ratio)
+            
+        line_dropdown.currentIndexChanged.connect(lambda: update_line_details(line_dropdown.currentText()))
         predefined_form.addRow("Select Line:", line_dropdown)
         
+
         # Custom line form
         name_input = QLineEdit()
         custom_form.addRow("Line Name:", name_input)
@@ -2978,14 +2999,13 @@ class SpectralFluxApp(QMainWindow):
         
         # Function to update form when selecting predefined line
         def update_line_details(line_name):
-            if line_name in predefined_lines:
-                line_data = predefined_lines[line_name]
+            if line_name in LINE_MAP:
+                line_data = LINE_MAP[line_name]
                 # Update doublet status
-                is_doublet.setChecked(line_data["is_doublet"])
-                
-                if line_data["is_doublet"]:
-                    secondary_wavelength.setValue(line_data["secondary_wavelength"])
-                    ratio_input.setValue(line_data["ratio"])
+            is_doublet.setChecked(line_data.is_doublet)
+            if line_data.is_doublet:
+                secondary_wavelength.setValue(line_data.secondary_wavelength)
+                ratio_input.setValue(line_data.doublet_ratio)
                     
         # Initialize with the first selection
         update_line_details(line_dropdown.currentText())
@@ -3001,8 +3021,8 @@ class SpectralFluxApp(QMainWindow):
             # Determine if using predefined or custom
             if predefined_radio.isChecked():
                 line_name = line_dropdown.currentText()
-                line_data = predefined_lines[line_name]
-                rest_wavelength = line_data["wavelength"]
+                line_data = LINE_MAP[line_name]
+                rest_wavelength = line_data.rest_wavelength
             else:
                 line_name = name_input.text()
                 rest_wavelength = wavelength_input.value()
@@ -3151,100 +3171,128 @@ class SpectralFluxApp(QMainWindow):
         self.objects_table.selectRow(row_count)
 
     def update_object_row_from_line_values(self, row_index):
-        """Update the flux values in the objects table from the left table with doublet summing"""
-        print(f'Updating object row {row_index} from line values')
-        # Dictionary to track doublet components for summing
-        doublet_sums = {
-            "Lya": {"flux": 0.0, "error": 0.0, "count": 0},
-            "OVI": {"flux": 0.0, "error": 0.0, "count": 0},
-            "NV": {"flux": 0.0, "error": 0.0, "count": 0},
-            "Si": {"flux": 0.0, "error": 0.0, "count": 0},
-            "CIV": {"flux": 0.0, "error": 0.0, "count": 0}
-        }
-        
-        # Line name mapping to doublet category
-        line_to_doublet = {
-            "Lya": "Lya",
-            "O VI 1031": "OVI",
-            "O VI 1037": "OVI",
-            "N V 1238": "NV",
-            "N V 1242": "NV",
-            "Si 1393": "Si",
-            "Si 1402": "Si",
-            "C IV 1548": "CIV",
-            "C IV 1550": "CIV",
-            "Ha": "Ha",
-            "Hb": "Hb",
-            "[OIII] 4958": "OIII",
-            "[OIII] 5006": "OIII",
-        }
-    
-        # Mapping from doublet categories to object table columns
-        doublet_to_columns = {
-            "Lya": (1, 2),    # (Flux column, Error column)
-            "OVI": (3, 4),
-            "NV": (7, 8),
-            "CIV": (5, 6),
-            "Si": None,        # Not included in right table, can be added if needed
-            "Ha": (12, 13),
-            "Hb": (14, 15),
-            "OIII": (16, 17),
-
-        }
-    
         # Process each row in the left table
         for left_row in range(self.table.rowCount()):
-            # Get the line name from the first column
             line_item = self.table.item(left_row, 0)
             if not line_item or not line_item.text():
                 continue
                 
             line_name = line_item.text()
-            # Check if this line belongs to a doublet category
-            if line_name in line_to_doublet:
-                doublet_category = line_to_doublet[line_name]
-                
-                # Get flux and error values if they exist
-                flux_item = self.table.item(left_row, 1)
-                error_item = self.table.item(left_row, 2)
-                
-                if flux_item and flux_item.text() and error_item and error_item.text():
-                    try:
-                        flux_value = float(flux_item.text())
-                        error_value = float(error_item.text())
-                        
-                        # Add to the appropriate doublet sum
-                        doublet_sums[doublet_category]["flux"] += flux_value
-                        # Adding errors in quadrature for better statistical handling
-                        doublet_sums[doublet_category]["error"] += error_value**2
-                        doublet_sums[doublet_category]["count"] += 1
-                    except ValueError:
-                        # Skip if we can't convert to float
-                        pass
+            
+            # Get flux and error values
+            flux_item = self.table.item(left_row, 1)
+            error_item = self.table.item(left_row, 2)
+            
+            if flux_item and flux_item.text() and error_item and error_item.text():
+                try:
+                    flux_value = float(flux_item.text())
+                    error_value = float(error_item.text())
+                    
+                    # Find the corresponding columns in objects table
+                    for col in range(4, self.objects_table.columnCount(), 2):  # Skip first 4 columns, step by 2
+                        header = self.objects_table.horizontalHeaderItem(col)
+                        if header and header.text() == line_name:
+                            # Found matching line - update flux and error
+                            self.objects_table.setItem(row_index, col, QTableWidgetItem(f"{flux_value:.2e}"))
+                            self.objects_table.setItem(row_index, col + 1, QTableWidgetItem(f"{error_value:.2e}"))
+                            break
+                except ValueError:
+                    pass
+    # def update_object_row_from_line_values(self, row_index):
+    #     """Update the flux values in the objects table from the left table with doublet summing"""
+    #     print(f'Updating object row {row_index} from line values')
+        # Dictionary to track doublet components for summing
+        # doublet_sums = {
+        #     "Lya": {"flux": 0.0, "error": 0.0, "count": 0},
+        #     "OVI": {"flux": 0.0, "error": 0.0, "count": 0},
+        #     "NV": {"flux": 0.0, "error": 0.0, "count": 0},
+        #     "Si": {"flux": 0.0, "error": 0.0, "count": 0},
+        #     "CIV": {"flux": 0.0, "error": 0.0, "count": 0}
+        # }
+        
+        # # Line name mapping to doublet category
+        # line_to_doublet = {
+        #     "Lya": "Lya",
+        #     "O VI 1031": "OVI",
+        #     "O VI 1037": "OVI",
+        #     "N V 1238": "NV",
+        #     "N V 1242": "NV",
+        #     "Si 1393": "Si",
+        #     "Si 1402": "Si",
+        #     "C IV 1548": "CIV",
+        #     "C IV 1550": "CIV",
+        #     "Ha": "Ha",
+        #     "Hb": "Hb",
+        #     "[OIII] 4958": "OIII",
+        #     "[OIII] 5006": "OIII",
+        # }
     
-        # Now update the object table with the summed values
-        for doublet, sum_data in doublet_sums.items():
-            if sum_data["count"] > 0 and doublet_to_columns.get(doublet):
-                flux_col, error_col = doublet_to_columns[doublet]
+        # # Mapping from doublet categories to object table columns
+        # doublet_to_columns = {
+        #     "Lya": (1, 2),    # (Flux column, Error column)
+        #     "OVI": (3, 4),
+        #     "NV": (7, 8),
+        #     "CIV": (5, 6),
+        #     "Si": None,        # Not included in right table, can be added if needed
+        #     "Ha": (12, 13),
+        #     "Hb": (14, 15),
+        #     "OIII": (16, 17),
+
+        # }
+    
+        # # Process each row in the left table
+        # for left_row in range(self.table.rowCount()):
+        #     # Get the line name from the first column
+        #     line_item = self.table.item(left_row, 0)
+        #     if not line_item or not line_item.text():
+        #         continue
                 
-                # Handle single line case (like Lya)
-                if doublet == "Lya":
-                    flux_value = sum_data["flux"]
-                    error_value = sum_data["error"] if sum_data["count"] == 1 else math.sqrt(sum_data["error"])
-                else:
-                    # For doublets, use the sum of flux measurements
-                    flux_value = sum_data["flux"]
-                    # Take the square root of summed squared errors (error propagation)
-                    error_value = math.sqrt(sum_data["error"])
+        #     line_name = line_item.text()
+        #     # Check if this line belongs to a doublet category
+        #     if line_name in line_to_doublet:
+        #         doublet_category = line_to_doublet[line_name]
                 
-                # Update the values in the objects table
-                self.objects_table.setItem(row_index, flux_col, QTableWidgetItem(f"{flux_value:.2e}"))
-                self.objects_table.setItem(row_index, error_col, QTableWidgetItem(f"{error_value:.2e}"))
-        # Add debugging to see final values
-        for doublet, sum_data in doublet_sums.items():
-            if sum_data["count"] > 0 and doublet_to_columns.get(doublet):
-                flux_col, error_col = doublet_to_columns[doublet]
-                print(f"  {doublet}: Flux={sum_data['flux']:.2e}, Count={sum_data['count']}")
+        #         # Get flux and error values if they exist
+        #         flux_item = self.table.item(left_row, 1)
+        #         error_item = self.table.item(left_row, 2)
+                
+        #         if flux_item and flux_item.text() and error_item and error_item.text():
+        #             try:
+        #                 flux_value = float(flux_item.text())
+        #                 error_value = float(error_item.text())
+                        
+        #                 # Add to the appropriate doublet sum
+        #                 doublet_sums[doublet_category]["flux"] += flux_value
+        #                 # Adding errors in quadrature for better statistical handling
+        #                 doublet_sums[doublet_category]["error"] += error_value**2
+        #                 doublet_sums[doublet_category]["count"] += 1
+        #             except ValueError:
+        #                 # Skip if we can't convert to float
+        #                 pass
+    
+        # # Now update the object table with the summed values
+        # for doublet, sum_data in doublet_sums.items():
+        #     if sum_data["count"] > 0 and doublet_to_columns.get(doublet):
+        #         flux_col, error_col = doublet_to_columns[doublet]
+                
+        #         # Handle single line case (like Lya)
+        #         if doublet == "Lya":
+        #             flux_value = sum_data["flux"]
+        #             error_value = sum_data["error"] if sum_data["count"] == 1 else math.sqrt(sum_data["error"])
+        #         else:
+        #             # For doublets, use the sum of flux measurements
+        #             flux_value = sum_data["flux"]
+        #             # Take the square root of summed squared errors (error propagation)
+        #             error_value = math.sqrt(sum_data["error"])
+                
+        #         # Update the values in the objects table
+        #         self.objects_table.setItem(row_index, flux_col, QTableWidgetItem(f"{flux_value:.2e}"))
+        #         self.objects_table.setItem(row_index, error_col, QTableWidgetItem(f"{error_value:.2e}"))
+        # # Add debugging to see final values
+        # for doublet, sum_data in doublet_sums.items():
+        #     if sum_data["count"] > 0 and doublet_to_columns.get(doublet):
+        #         flux_col, error_col = doublet_to_columns[doublet]
+        #         print(f"  {doublet}: Flux={sum_data['flux']:.2e}, Count={sum_data['count']}")
     def ensure_optical_columns_exist(self):
         # Check if optical columns exist, add them if needed
         current_column_count = self.objects_table.columnCount()
@@ -3513,7 +3561,8 @@ class SpectralFluxApp(QMainWindow):
 
     def zoom_to_line(self):
         if self.coadded_spectrum:
-            selected_line = self.line_dropdown.currentIndex()
+            selected_index = self.line_dropdown.currentIndex()
+            selected_line = self.line_dropdown.currentText()
             is_optical = self.coadded_spectrum.get('is_optical', False)
             
             # Use the appropriate line wavelengths based on spectrum type
@@ -3543,15 +3592,18 @@ class SpectralFluxApp(QMainWindow):
                     line_def = LINE_MAP[selected_line]
                     rest_frame_wavelength = line_def.rest_wavelength * (1 + self.redshift)
                     zoom_range = (rest_frame_wavelength - 50, rest_frame_wavelength + 50)
+                    tight_zoom_range = (rest_frame_wavelength - 5, rest_frame_wavelength + 5)
                     mask = (wave >= zoom_range[0]) & (wave <= zoom_range[1])
+                    tight_mask = (wave >= tight_zoom_range[0]) & (wave <= tight_zoom_range[1])
                     wave_zoom = wave[mask]
                     flux_zoom = flux[mask]
+                    tight_flux_zoom = flux[tight_mask]
 
                     ax = self.ax
                     ax.plot(wave, flux, color='black', drawstyle='steps-mid')
                     ax.plot(wave, (error_up + error_down)/2, color='grey', drawstyle='steps-mid')
                     ax.set_xlim(zoom_range)
-                    ax.set_ylim(0, np.max(flux_zoom[~np.isnan(flux_zoom)]) * 1.1)
+                    ax.set_ylim(0, np.max(tight_flux_zoom[~np.isnan(tight_flux_zoom)]) * 1.1)
                     ax.set_xlabel('Wavelength')
                     ax.set_ylabel(f'Flux (erg / s / cm^2 / A ) (scaled by {self.scale_value:0.2e})')
                     
@@ -3731,6 +3783,7 @@ class SpectralFluxApp(QMainWindow):
             self.table.setItem(table_row, 7, QTableWidgetItem(f'{cont_slope:.2e}'))
             self.table.setItem(table_row, 8, QTableWidgetItem(f'{cont_intercept:.2e}'))
 
+            self.auto_save_current_object()
             self.table.resizeColumnsToContents()
 
             selected_rows = self.objects_table.selectionModel().selectedRows()
